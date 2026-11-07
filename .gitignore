@@ -1,0 +1,28 @@
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Build output
+frontend/.next/
+frontend/out/
+frontend/build/
+
+# Test output
+frontend/playwright-report/
+frontend/test-results/
+backend/coverage/
+frontend/coverage/
+
+# Logs and temporary files
+*.log
+npm-debug.log*
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

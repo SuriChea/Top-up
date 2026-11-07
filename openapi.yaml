@@ -1,0 +1,525 @@
+openapi: 3.1.0
+info:
+  title: InBlack Top-Up API
+  version: 1.0.0
+  description: Customer, administrator, payment, and reconciliation APIs implemented by the service.
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      responses:
+        "200":
+          description: The API process is alive.
+  /readyz:
+    get:
+      summary: Dependency readiness probe
+      responses:
+        "200":
+          description: PostgreSQL and Redis are available.
+        "503":
+          description: A required dependency is unavailable.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /api/v1/products:
+    get:
+      summary: List active products
+      responses:
+        "200":
+          description: Active products.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Product"
+  /api/v1/products/{slug}:
+    get:
+      summary: Get an active product by SKU
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Product details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          description: Product not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /api/v1/orders/quote:
+    post:
+      summary: Calculate an order total without reserving inventory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderRequest"
+      responses:
+        "200":
+          description: Exact integer-satang quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          description: Invalid order or discount input.
+  /api/v1/orders:
+    post:
+      summary: Create a pending order
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+            maxLength: 200
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderRequest"
+      responses:
+        "201":
+          description: Pending payment order and short-lived tracking token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "409":
+          description: Stock or voucher conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Idempotency key was reused with a different request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /api/v1/orders/track:
+    post:
+      summary: Find an order using its ID and checkout email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order_id, email]
+              properties:
+                order_id:
+                  type: string
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: Order and a short-lived tracking token.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [order, trackingToken]
+                properties:
+                  order:
+                    $ref: "#/components/schemas/Order"
+                  trackingToken:
+                    type: string
+        "404":
+          description: Order not found or email does not match.
+        "429":
+          description: Tracking rate limit exceeded.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+  /api/v1/orders/{id}:
+    get:
+      summary: Get order details
+      description: This route currently returns 404; authenticated order retrieval is not implemented.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "404":
+          description: Order retrieval is not available on this route yet.
+  /api/v1/orders/{id}/events:
+    get:
+      summary: Subscribe to order status events
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: Authorization
+          required: true
+          description: Bearer tracking token returned at order creation or tracking.
+          schema:
+            type: string
+        - in: header
+          name: Last-Event-ID
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Server-sent order events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "404":
+          description: Invalid order ID or tracking token.
+  /api/v1/webhooks/payment:
+    post:
+      summary: Receive a signed payment-provider event
+      description: Verify X-IBM-Signature as HMAC-SHA256 over the exact raw body and timestamp, within a 300-second window.
+      parameters:
+        - in: header
+          name: X-IBM-Signature
+          required: true
+          schema:
+            type: string
+            pattern: "^t=[0-9]+,v1=[a-f0-9]{64}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentEvent"
+      responses:
+        "200":
+          description: Event accepted or already processed.
+        "400":
+          description: Invalid event.
+        "401":
+          description: Invalid or expired signature.
+        "404":
+          description: Order not found.
+  /api/v1/auth/request-otp:
+    post:
+      summary: Send a one-time sign-in code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "202":
+          description: The sign-in code was sent.
+        "429":
+          description: Rate limit exceeded.
+  /api/v1/auth/verify-otp:
+    post:
+      summary: Verify a one-time code and create a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email:
+                  type: string
+                  format: email
+                code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+      responses:
+        "200":
+          description: Session cookie issued.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        "401":
+          description: Code is invalid or expired.
+  /api/v1/auth/me:
+    get:
+      summary: Get the current session user
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Current customer or administrator.
+        "401":
+          description: Session is missing or expired.
+  /api/v1/auth/logout:
+    post:
+      summary: Revoke the current session
+      security:
+        - sessionCookie: []
+      responses:
+        "204":
+          description: Session revoked.
+  /api/v1/admin/products:
+    get:
+      summary: List all products for administrators
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Products including inactive entries.
+        "403":
+          description: Administrator role required.
+  /api/v1/admin/products/{sku}:
+    patch:
+      summary: Update product price, inventory, or availability
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: path
+          name: sku
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                priceSatang:
+                  type: integer
+                  minimum: 0
+                stock:
+                  type: integer
+                  minimum: -1
+                active:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated product.
+        "403":
+          description: Administrator role required.
+  /api/v1/admin/orders:
+    get:
+      summary: List recent orders for administrators
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Up to 100 recent orders.
+        "403":
+          description: Administrator role required.
+  /api/v1/admin/orders/{id}/refund:
+    post:
+      summary: Queue a full refund for an eligible order
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+                  maxLength: 300
+      responses:
+        "202":
+          description: Refund queued for the payment worker.
+        "409":
+          description: Order is not refundable or a refund is already pending.
+  /api/v1/admin/reconciliation/import:
+    post:
+      summary: Import and reconcile a provider settlement CSV
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema:
+              type: string
+              description: CSV with event_id, order_id, amount_satang, currency, and type columns.
+      responses:
+        "201":
+          description: Reconciliation batch and summary counts.
+        "400":
+          description: Invalid CSV.
+        "403":
+          description: Administrator role required.
+  /api/v1/admin/reconciliation:
+    get:
+      summary: List recent reconciliation batches
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Recent batch summaries.
+  /api/v1/admin/reconciliation/{id}:
+    get:
+      summary: Get a reconciliation batch and its comparison rows
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Batch report.
+        "404":
+          description: Batch not found.
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: inblack_session
+  schemas:
+    Product:
+      type: object
+      required: [sku, name, price_satang, stock, max_per_order]
+      properties:
+        sku:
+          type: string
+        name:
+          type: string
+        price_satang:
+          type: integer
+          minimum: 0
+        stock:
+          type: integer
+          minimum: -1
+        max_per_order:
+          type: integer
+          minimum: 1
+    OrderRequest:
+      type: object
+      required: [sku, quantity, email, playerId, paymentMethod]
+      properties:
+        sku:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 10
+        email:
+          type: string
+          format: email
+        playerId:
+          type: string
+        discountCode:
+          type: [string, "null"]
+        paymentMethod:
+          type: string
+          enum: [promptpay, truemoney, card]
+    Quote:
+      type: object
+      required: [sku, productName, quantity, subtotalSatang, discountSatang, feeSatang, vatSatang, totalSatang]
+      properties:
+        sku:
+          type: string
+        productName:
+          type: string
+        quantity:
+          type: integer
+        subtotalSatang:
+          type: integer
+        discountSatang:
+          type: integer
+        feeSatang:
+          type: integer
+        vatSatang:
+          type: integer
+        totalSatang:
+          type: integer
+    Order:
+      allOf:
+        - $ref: "#/components/schemas/Quote"
+        - type: object
+          required: [id, status, paymentMethod, trackingToken]
+          properties:
+            id:
+              type: string
+              pattern: "^ORD-[0-9]{13}-[0-9]{3}$"
+            email:
+              type: string
+            playerId:
+              type: string
+            status:
+              type: string
+            paymentMethod:
+              type: string
+            trackingToken:
+              type: string
+    PaymentEvent:
+      type: object
+      required: [event_id, type, order_id, amount_satang, currency, occurred_at]
+      properties:
+        event_id:
+          type: string
+        type:
+          type: string
+          enum: [payment.succeeded, payment.failed, payment.refunded]
+        order_id:
+          type: string
+        amount_satang:
+          type: integer
+          minimum: 0
+        currency:
+          const: THB
+        occurred_at:
+          type: string
+          format: date-time
+    Problem:
+      type: object
+      required: [type, title, status, code, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        detail:
+          type: string

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      ADMIN_EMAILS: admin@example.test
+      E2E_ADMIN_EMAIL: admin@example.test
+      WEB_ORIGIN: http://localhost:3000
+      AUTH_SECRET: ci-auth-secret-0123456789-0123456789
+      TRACKING_TOKEN_SECRET: ci-tracking-secret-0123456789
+      PAYMENT_WEBHOOK_SECRET: ci-webhook-secret
+      E2E_BASE_URL: http://localhost:3000
+      MAILPIT_API_URL: http://127.0.0.1:8025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - run: npm ci --prefix backend
+      - run: npm test --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run lint --prefix frontend
+      - run: npx --prefix frontend tsc --noEmit -p frontend/tsconfig.json --incremental false
+      - run: npm run build --prefix frontend
+      - run: npx --prefix frontend playwright install --with-deps chromium
+      - run: docker compose up --build --detach
+      - name: Wait for services
+        run: |
+          curl --retry 40 --retry-connrefused --retry-delay 2 --fail http://localhost:3000/ >/dev/null
+          curl --retry 40 --retry-connrefused --retry-delay 2 --fail http://127.0.0.1:8025/api/v1/messages >/dev/null
+      - run: npm run test:e2e --prefix frontend
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop services
+        if: always()
+        run: docker compose down

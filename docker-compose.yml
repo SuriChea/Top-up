@@ -1,0 +1,182 @@
+services:
+  web:
+    build:
+      context: ./frontend
+      args:
+        API_INTERNAL_URL: http://proxy:8080
+    environment:
+      API_INTERNAL_URL: http://proxy:8080
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      proxy:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  proxy:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      api-1:
+        condition: service_healthy
+      api-2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api-1:
+    build: ./backend
+    command: ["npm", "start"]
+    environment: &backend-env
+      PORT: 3001
+      DATABASE_URL: postgres://inblack:inblack_dev@postgres:5432/inblack
+      REDIS_URL: redis://redis:6379
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-whsec_test_inblackm_2026}
+      TRACKING_TOKEN_SECRET: ${TRACKING_TOKEN_SECRET:-local_tracking_secret_replace_me}
+      AUTH_SECRET: ${AUTH_SECRET:-local_auth_secret_replace_me}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      MAIL_HOST: ${MAIL_HOST:-mailpit}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USER: ${MAIL_USER:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_SECURE: ${MAIL_SECURE:-false}
+      MAIL_FROM: ${MAIL_FROM:-InBlack Top-Up <no-reply@inblack.local>}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      ORDER_TTL_SECONDS: ${ORDER_TTL_SECONDS:-900}
+      MOCK_GAME_URL: http://mock-game:4002
+      MOCK_PAY_URL: http://mock-pay:4001
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000,http://localhost:3005}
+    depends_on: &backend-depends
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api-2:
+    build: ./backend
+    command: ["npm", "start"]
+    environment: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api-1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    command: ["node", "worker.js"]
+    environment:
+      <<: *backend-env
+      WORKER_MAX_ATTEMPTS: ${WORKER_MAX_ATTEMPTS:-8}
+    depends_on: *backend-depends
+    restart: unless-stopped
+
+  mock-pay:
+    build: ./backend
+    command: ["node", "mock.js"]
+    environment:
+      MOCK_KIND: pay
+      PORT: 4001
+      DATABASE_URL: postgres://inblack:inblack_dev@postgres:5432/inblack
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-whsec_test_inblackm_2026}
+      API_URL: http://proxy:8080
+      WEB_ORIGIN: http://localhost:3000
+    ports:
+      - "${MOCK_PAY_PORT:-4001}:4001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  mock-game:
+    build: ./backend
+    command: ["node", "mock.js"]
+    environment:
+      MOCK_KIND: game
+      PORT: 4002
+      DATABASE_URL: postgres://inblack:inblack_dev@postgres:5432/inblack
+      FAIL_RATE: ${FAIL_RATE:-0}
+      TIMEOUT_RATE: ${TIMEOUT_RATE:-0}
+      SUCCESS_BUT_TIMEOUT_RATE: ${SUCCESS_BUT_TIMEOUT_RATE:-0}
+      LATENCY_MS: ${LATENCY_MS:-0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4002/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: inblack
+      POSTGRES_USER: inblack
+      POSTGRES_PASSWORD: inblack_dev
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inblack -d inblack"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports:
+      - "${MAILPIT_WEB_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:

@@ -1,0 +1,18 @@
+{
+  "name": "inblack-topup-api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node migrate.js && node server.js",
+    "start:worker": "node worker.js",
+    "migrate": "node migrate.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "ioredis": "^5.4.2",
+    "nodemailer": "^10.3.1",
+    "pg": "^8.13.1"
+  }
+}
