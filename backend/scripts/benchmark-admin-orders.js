@@ -7,6 +7,7 @@ const apiUrl = process.env.API_BASE_URL || "http://localhost:8080";
 const adminEmail = (process.env.BENCHMARK_ADMIN_EMAIL || "").trim().toLowerCase();
 const sampleCount = Number(process.env.BENCHMARK_REQUESTS || 100);
 const warmupCount = Number(process.env.BENCHMARK_WARMUP || 10);
+const p95LimitMs = 200;
 
 function percentile(values, proportion) {
   const sorted = [...values].sort((left, right) => left - right);
@@ -34,30 +35,40 @@ async function benchmark() {
   );
 
   try {
-    const latencies = [];
-    for (let index = 0; index < warmupCount + sampleCount; index += 1) {
-      const startedAt = performance.now();
-      const response = await fetch(`${apiUrl}/api/v1/admin/orders?limit=50`, {
-        headers: { Cookie: `inblack_session=${token}` }
-      });
-      const duration = performance.now() - startedAt;
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`Admin orders returned HTTP ${response.status}: ${detail}`);
+    const filterFrom = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const endpoints = [
+      "/api/v1/admin/orders?limit=50",
+      `/api/v1/admin/orders?limit=50&status=COMPLETED&from=${encodeURIComponent(filterFrom)}`
+    ];
+    const measurements = [];
+    for (const endpoint of endpoints) {
+      const latencies = [];
+      for (let index = 0; index < warmupCount + sampleCount; index += 1) {
+        const startedAt = performance.now();
+        const response = await fetch(`${apiUrl}${endpoint}`, {
+          headers: { Cookie: `inblack_session=${token}` }
+        });
+        const duration = performance.now() - startedAt;
+        if (!response.ok) {
+          const detail = await response.text();
+          throw new Error(`${endpoint} returned HTTP ${response.status}: ${detail}`);
+        }
+        const page = await response.json();
+        if (!Array.isArray(page.orders)) throw new Error(`${endpoint} response is missing its orders array`);
+        if (index >= warmupCount) latencies.push(duration);
       }
-      const page = await response.json();
-      if (!Array.isArray(page.orders)) throw new Error("Admin orders response is missing its orders array");
-      if (index >= warmupCount) latencies.push(duration);
+      measurements.push({
+        endpoint: `GET ${endpoint}`,
+        samples: sampleCount,
+        warmup: warmupCount,
+        medianMs: Number(percentile(latencies, 0.5).toFixed(2)),
+        p95Ms: Number(percentile(latencies, 0.95).toFixed(2)),
+        maxMs: Number(Math.max(...latencies).toFixed(2))
+      });
     }
-
-    console.log(JSON.stringify({
-      endpoint: "GET /api/v1/admin/orders?limit=50",
-      samples: sampleCount,
-      warmup: warmupCount,
-      medianMs: Number(percentile(latencies, 0.5).toFixed(2)),
-      p95Ms: Number(percentile(latencies, 0.95).toFixed(2)),
-      maxMs: Number(Math.max(...latencies).toFixed(2))
-    }));
+    console.log(JSON.stringify({ p95LimitMs, measurements }));
+    const failing = measurements.find((measurement) => measurement.p95Ms >= p95LimitMs);
+    if (failing) throw new Error(`${failing.endpoint} p95 ${failing.p95Ms}ms exceeds the ${p95LimitMs}ms limit`);
   } finally {
     await pool.query("DELETE FROM auth_sessions WHERE token_hash = $1", [tokenHash]);
   }

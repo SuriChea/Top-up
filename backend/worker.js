@@ -1,5 +1,9 @@
+require("./tracing");
+
 const { Pool } = require("pg");
 const Redis = require("ioredis");
+const nodemailer = require("nodemailer");
+const { trace } = require("@opentelemetry/api");
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const redis = new Redis(process.env.REDIS_URL || "redis://redis:6379", {
@@ -9,6 +13,20 @@ const redis = new Redis(process.env.REDIS_URL || "redis://redis:6379", {
 const gameUrl = process.env.MOCK_GAME_URL || "http://mock-game:4002";
 const payUrl = process.env.MOCK_PAY_URL || "http://mock-pay:4001";
 const maxAttempts = Number(process.env.WORKER_MAX_ATTEMPTS || 8);
+const mailer = nodemailer.createTransport({
+  host: process.env.MAIL_HOST || "mailpit",
+  port: Number(process.env.MAIL_PORT || 1025),
+  secure: process.env.MAIL_SECURE === "true",
+  auth: process.env.MAIL_USER
+    ? { user: process.env.MAIL_USER, pass: process.env.MAIL_PASSWORD }
+    : undefined
+});
+const tracer = trace.getTracer("inblack-worker");
+
+function activeTraceId() {
+  const traceId = trace.getActiveSpan()?.spanContext().traceId;
+  return traceId && traceId !== "00000000000000000000000000000000" ? traceId : null;
+}
 
 async function publish(event) {
   try {
@@ -62,6 +80,10 @@ async function expireOrders() {
     await client.query(
       `UPDATE refund_jobs SET status = 'retry', run_after = NOW()
        WHERE status = 'in_progress' AND run_after < NOW() - INTERVAL '2 minutes'`
+    );
+    await client.query(
+      `UPDATE email_outbox SET status = 'retry', run_after = NOW(), locked_at = NULL
+       WHERE status = 'sending' AND locked_at < NOW() - INTERVAL '2 minutes'`
     );
     await client.query("COMMIT");
   } catch (error) {
@@ -170,6 +192,14 @@ async function processJob(job) {
     if (lockedOrder.rows[0] && ["IN_PROGRESS", "IN_QUEUE"].includes(lockedOrder.rows[0].status)) {
       event = await setStatus(client, job.order_id, "COMPLETED", "Game top-up confirmed");
     }
+    if (event?.status === "COMPLETED") {
+      await client.query(
+        `INSERT INTO email_outbox (order_id, recipient_email)
+         SELECT id, email FROM orders WHERE id = $1
+         ON CONFLICT (order_id, message_type) DO NOTHING`,
+        [job.order_id]
+      );
+    }
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -204,6 +234,7 @@ async function processJob(job) {
         level: "warn",
         order_id: job.order_id,
         attempt: job.attempts,
+        trace_id: activeTraceId(),
         message: "fulfillment_retry_scheduled",
         error: error.message
       }));
@@ -293,7 +324,94 @@ async function processRefund() {
         );
       }
     }
-    console.error(JSON.stringify({ level: "error", message: "automatic_refund_failed", error: error.message }));
+    console.error(JSON.stringify({
+      level: "error",
+      message: "automatic_refund_failed",
+      order_id: refund?.order_id,
+      trace_id: activeTraceId(),
+      error: error.message
+    }));
+  } finally {
+    client.release();
+  }
+}
+
+function formatReceiptAmount(satang) {
+  const amount = BigInt(satang);
+  return `THB ${(amount / 100n).toLocaleString("en-US")}.${String(amount % 100n).padStart(2, "0")}`;
+}
+
+async function processReceipt() {
+  const client = await pool.connect();
+  let receipt;
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `SELECT id, order_id, recipient_email
+       FROM email_outbox
+       WHERE status IN ('queued', 'retry') AND run_after <= NOW()
+       ORDER BY run_after, id FOR UPDATE SKIP LOCKED LIMIT 1`
+    );
+    receipt = result.rows[0];
+    if (!receipt) {
+      await client.query("COMMIT");
+      return;
+    }
+    await client.query(
+      `UPDATE email_outbox SET status = 'sending', attempts = attempts + 1,
+       locked_at = NOW(), updated_at = NOW() WHERE id = $1`,
+      [receipt.id]
+    );
+    await client.query("COMMIT");
+
+    const [orderResult, itemResult] = await Promise.all([
+      pool.query("SELECT total_satang FROM orders WHERE id = $1", [receipt.order_id]),
+      pool.query(
+        `SELECT product_name, sku, quantity FROM order_items
+         WHERE order_id = $1 ORDER BY id`,
+        [receipt.order_id]
+      )
+    ]);
+    if (!orderResult.rows[0]) throw new Error("Receipt order was not found");
+    const itemLines = itemResult.rows.map((item) =>
+      `- ${item.product_name} (${item.sku}) x ${item.quantity}`
+    ).join("\n");
+    await mailer.sendMail({
+      from: process.env.MAIL_FROM || "InBlack Top-Up <no-reply@inblack.local>",
+      to: receipt.recipient_email,
+      subject: `Payment receipt for order ${receipt.order_id}`,
+      text: [
+        "Thank you for your purchase.",
+        `Order: ${receipt.order_id}`,
+        itemLines,
+        `Total paid: ${formatReceiptAmount(orderResult.rows[0].total_satang)}`
+      ].filter(Boolean).join("\n")
+    });
+    await pool.query(
+      `UPDATE email_outbox SET status = 'sent', sent_at = NOW(), locked_at = NULL,
+       last_error = NULL, updated_at = NOW() WHERE id = $1`,
+      [receipt.id]
+    );
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    if (receipt) {
+      const state = await pool.query("SELECT attempts FROM email_outbox WHERE id = $1", [receipt.id]);
+      const attempts = Number(state.rows[0]?.attempts || 0);
+      const dead = attempts >= maxAttempts;
+      const delay = Math.min(300, 2 ** attempts) * (0.5 + Math.random());
+      await pool.query(
+        `UPDATE email_outbox SET status = $2, run_after = NOW() + ($3 * INTERVAL '1 second'),
+         locked_at = NULL, last_error = $4, updated_at = NOW() WHERE id = $1`,
+        [receipt.id, dead ? "dead" : "retry", delay, error.message]
+      );
+    }
+    console.error(JSON.stringify({
+      level: "error",
+      message: "receipt_delivery_failed",
+      order_id: receipt?.order_id,
+      trace_id: activeTraceId(),
+      error: error.message
+    }));
   } finally {
     client.release();
   }
@@ -305,13 +423,38 @@ async function run() {
       await expireOrders();
       const job = await claimJob();
       if (job) {
-        await processJob(job);
+        await tracer.startActiveSpan("fulfillment.process", async (span) => {
+          span.setAttribute("order.id", job.order_id);
+          try {
+            await processJob(job);
+          } finally {
+            span.end();
+          }
+        });
         continue;
       }
-      await processRefund();
+      await tracer.startActiveSpan("refund.process", async (span) => {
+        try {
+          await processRefund();
+        } finally {
+          span.end();
+        }
+      });
+      await tracer.startActiveSpan("receipt.process", async (span) => {
+        try {
+          await processReceipt();
+        } finally {
+          span.end();
+        }
+      });
       await new Promise((resolve) => setTimeout(resolve, 500));
     } catch (error) {
-      console.error(JSON.stringify({ level: "error", message: "worker_loop_failed", error: error.message }));
+      console.error(JSON.stringify({
+        level: "error",
+        message: "worker_loop_failed",
+        trace_id: activeTraceId(),
+        error: error.message
+      }));
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }

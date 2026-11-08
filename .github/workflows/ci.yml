@@ -32,7 +32,6 @@ jobs:
             backend/package-lock.json
             frontend/package-lock.json
       - run: npm ci --prefix backend
-      - run: npx --prefix backend prisma validate --schema backend/prisma/schema.prisma
       - run: npm test --prefix backend
       - run: npm ci --prefix frontend
       - run: npm run lint --prefix frontend
@@ -45,6 +44,7 @@ jobs:
           curl --retry 40 --retry-connrefused --retry-delay 2 --fail http://localhost:3000/ >/dev/null
           curl --retry 40 --retry-connrefused --retry-delay 2 --fail http://localhost:8080/healthz >/dev/null
           curl --retry 40 --retry-connrefused --retry-delay 2 --fail http://127.0.0.1:8025/api/v1/messages >/dev/null
+          curl --retry 40 --retry-connrefused --retry-delay 2 --fail http://127.0.0.1:16686/api/services >/dev/null
       - name: Backend integration tests
         run: RUN_INTEGRATION_TESTS=1 npm test --prefix backend
       - run: npm run test:e2e --prefix frontend

@@ -1,7 +1,10 @@
+require("./tracing");
+
 const crypto = require("node:crypto");
 const cors = require("cors");
 const express = require("express");
 const nodemailer = require("nodemailer");
+const { trace } = require("@opentelemetry/api");
 const { Pool } = require("pg");
 const Redis = require("ioredis");
 const { calculateTotals, canTransitionOrder, newOrderId, validOrderId } = require("./domain");
@@ -120,6 +123,11 @@ app.use((req, _res, next) => {
 
 const requestMetrics = { count: 0, durationSeconds: 0, buckets: new Map() };
 const latencyBuckets = [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5];
+function activeTraceId() {
+  const traceId = trace.getActiveSpan()?.spanContext().traceId;
+  return traceId && traceId !== "00000000000000000000000000000000" ? traceId : null;
+}
+
 app.use((req, res, next) => {
   const startedAt = process.hrtime.bigint();
   res.once("finish", () => {
@@ -133,7 +141,7 @@ app.use((req, res, next) => {
       level: "info",
       message: "http_request",
       request_id: req.requestId,
-      trace_id: req.get("traceparent")?.split("-")[1] || null,
+      trace_id: activeTraceId(),
       method: req.method,
       path: req.path,
       status: res.statusCode,
@@ -642,7 +650,7 @@ app.post("/api/v1/_test/reset", async (req, res, next) => {
   try {
     await client.query("BEGIN");
     await client.query(`TRUNCATE TABLE
-      refund_idempotency, mock_payment_refunds, refund_jobs, fulfillment_jobs,
+      email_outbox, refund_idempotency, mock_payment_refunds, refund_jobs, fulfillment_jobs,
       payment_webhook_events, reconciliation_items, reconciliation_batches,
       admin_audit_logs, refund_requests, otp_email_locks, otp_challenges,
       auth_sessions, auth_users, order_events, order_items, orders, idempotency_keys,
@@ -1004,7 +1012,7 @@ function clearSessionCookie(res) {
   });
 }
 
-app.post("/api/v1/auth/request-otp", async (req, res, next) => {
+app.post(["/api/v1/auth/request-otp", "/api/v1/auth/otp/request"], async (req, res, next) => {
   let challengeId;
   try {
     const email = normalizeEmail(req.body?.email);
@@ -1050,7 +1058,7 @@ app.post("/api/v1/auth/request-otp", async (req, res, next) => {
   }
 });
 
-app.post("/api/v1/auth/verify-otp", async (req, res, next) => {
+app.post(["/api/v1/auth/verify-otp", "/api/v1/auth/otp/verify"], async (req, res, next) => {
   const email = normalizeEmail(req.body?.email);
   const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
   if (!validEmail(email) || !/^\d{6}$/.test(code)) {

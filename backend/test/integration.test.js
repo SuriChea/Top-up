@@ -6,6 +6,7 @@ const { hashSessionToken } = require("../auth");
 
 const apiUrl = process.env.API_BASE_URL || "http://localhost:8080";
 const mockPayUrl = process.env.MOCK_PAY_PUBLIC_URL || "http://localhost:4001";
+const mailpitUrl = process.env.MAILPIT_API_URL || "http://127.0.0.1:8025";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const origin = process.env.WEB_ORIGIN?.split(",")[0] || "http://localhost:3000";
 
@@ -68,11 +69,50 @@ async function waitForOrder(orderId, session, predicate, timeoutMs = 20_000) {
   throw new Error(`Timed out waiting for order ${orderId}`);
 }
 
+async function waitForReceipt(orderId, email, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await pool.query(
+      "SELECT status FROM email_outbox WHERE order_id = $1 AND message_type = 'receipt'",
+      [orderId]
+    );
+    if (result.rows[0]?.status === "sent") {
+      const listResponse = await fetch(`${mailpitUrl}/api/v1/messages?limit=100`);
+      if (!listResponse.ok) throw new Error(`Mailpit returned HTTP ${listResponse.status}`);
+      const list = await listResponse.json();
+      const message = (list.messages || []).find((item) => JSON.stringify(item.To || item).includes(email));
+      if (message?.ID) {
+        const detailResponse = await fetch(`${mailpitUrl}/api/v1/message/${encodeURIComponent(message.ID)}`);
+        if (!detailResponse.ok) throw new Error(`Mailpit message lookup returned HTTP ${detailResponse.status}`);
+        const detail = await detailResponse.json();
+        const content = [detail.Subject, detail.Text, detail.HTML].join("\n");
+        if (content.includes(orderId)) return;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`Timed out waiting for receipt email for order ${orderId}`);
+}
+
 test("PostgreSQL/Redis concurrency, idempotency, purchase limits, refunds, and RBAC", {
   skip: process.env.RUN_INTEGRATION_TESTS !== "1"
 }, async () => {
   const reset = await fetch(`${apiUrl}/api/v1/_test/reset`, { method: "POST" });
   assert.equal(reset.status, 200, "integration tests require APP_ENV=test and a running Compose stack");
+
+  const otpEmail = `otp-alias-${crypto.randomUUID()}@example.test`;
+  const otpRequest = await fetch(`${apiUrl}/api/v1/auth/otp/request`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: otpEmail })
+  });
+  assert.equal(otpRequest.status, 202);
+  const otpVerify = await fetch(`${apiUrl}/api/v1/auth/otp/verify`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: otpEmail, code: "invalid" })
+  });
+  assert.equal(otpVerify.status, 400);
 
   const [idempotentUser] = await makeSessions(1, "idempotency");
   const request = {
@@ -172,6 +212,36 @@ test("PostgreSQL/Redis concurrency, idempotency, purchase limits, refunds, and R
   );
   assert.equal(couponUsage.rows[0].uses_count, 10);
 
+  const [multiUser] = await makeSessions(1, "multi-item");
+  const multiPurchase = await requestOrder(multiUser, crypto.randomUUID(), {
+    items: [
+      { sku: "DIAMOND-1000", quantity: 1, playerId: "multi-player-one" },
+      { sku: "DIAMOND-5000", quantity: 1, playerId: "multi-player-two" }
+    ],
+    paymentMethod: "promptpay"
+  });
+  assert.equal(multiPurchase.status, 201);
+  const multiOrder = await multiPurchase.json();
+  assert.equal(multiOrder.items.length, 2);
+  const multiPayment = await fetch(`${mockPayUrl}/simulate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      orderId: multiOrder.id,
+      amountSatang: multiOrder.totalSatang,
+      mode: "duplicate"
+    })
+  });
+  assert.equal(multiPayment.status, 202);
+  await waitForOrder(multiOrder.id, multiUser, (order) => order.status === "COMPLETED");
+  await waitForReceipt(multiOrder.id, multiUser.email);
+  const multiTopups = await pool.query(
+    "SELECT reference, COUNT(*)::integer AS count FROM mock_game_topups WHERE reference = ANY($1::text[]) GROUP BY reference",
+    [[`${multiOrder.id}:DIAMOND-1000`, `${multiOrder.id}:DIAMOND-5000`]]
+  );
+  assert.equal(multiTopups.rowCount, 2);
+  assert.ok(multiTopups.rows.every((row) => row.count === 1), "duplicate webhooks must never duplicate item fulfillment");
+
   const [refundCustomer] = await makeSessions(1, "refund-customer");
   const adminEmail = process.env.E2E_ADMIN_EMAIL || "admin@example.test";
   const adminRow = await pool.query("SELECT id FROM auth_users WHERE email = $1", [adminEmail]);
@@ -237,12 +307,26 @@ test("PostgreSQL/Redis concurrency, idempotency, purchase limits, refunds, and R
   const refunded = await waitForOrder(purchased.id, refundCustomer, (order) => order.status === "REFUNDED");
   assert.equal(refunded.refundedSatang, refunded.totalSatang);
 
+  const [outsider] = await makeSessions(1, "order-outsider");
+  const idorResponse = await fetch(`${apiUrl}/api/v1/orders/${encodeURIComponent(purchased.id)}`, {
+    headers: { Cookie: outsider.cookie }
+  });
+  assert.equal(idorResponse.status, 404, "another customer's order is hidden from the viewer");
   const [viewer] = await makeSessions(1, "viewer", "viewer");
   const viewerOrders = await fetch(`${apiUrl}/api/v1/admin/orders?limit=1`, {
     headers: { Cookie: viewer.cookie }
   });
   assert.equal(viewerOrders.status, 200);
   const viewerPage = await viewerOrders.json();
+  assert.equal(viewerPage.orders.length, 1);
+  assert.ok(viewerPage.nextCursor, "admin order pagination exposes a cursor when another page exists");
+  const nextViewerPage = await fetch(
+    `${apiUrl}/api/v1/admin/orders?limit=1&cursor=${encodeURIComponent(viewerPage.nextCursor)}`,
+    { headers: { Cookie: viewer.cookie } }
+  );
+  assert.equal(nextViewerPage.status, 200);
+  const nextPage = await nextViewerPage.json();
+  assert.notEqual(nextPage.orders[0].id, viewerPage.orders[0].id);
   assert.match(viewerPage.orders[0].email, /\*/);
   assert.equal(viewerPage.orders[0].playerId, "***");
   const viewerRefund = await fetch(`${apiUrl}/api/v1/admin/orders/${encodeURIComponent(purchased.id)}/refund`, {

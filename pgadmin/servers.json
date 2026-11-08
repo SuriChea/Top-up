@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "InBlack Top-Up (Docker)",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "inblack",
+      "Username": "inblack",
+      "SSLMode": "prefer"
+    }
+  }
+}

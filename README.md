@@ -14,16 +14,16 @@
 
 ### เครื่องมือฐานข้อมูล
 
-ฐานข้อมูลทำงานใน Compose service ชื่อ `postgres`; ไฟล์ข้อมูลอยู่ใน Docker named volume `postgres-data` ไม่ได้อยู่ในโฟลเดอร์ PostgreSQL บนเครื่อง เปิดเครื่องมือเสริมด้วยคำสั่ง:
+ฐานข้อมูลทำงานใน Compose service ชื่อ `postgres`; ไฟล์ข้อมูลอยู่ใน Docker named volume `postgres-data` ไม่ได้อยู่ในโฟลเดอร์ PostgreSQL บนเครื่อง เปิด pgAdmin และ Jaeger ด้วยคำสั่ง:
 
 ```powershell
-docker compose --profile tools up -d pgadmin prisma-studio
+docker compose --profile tools up -d pgadmin
 ```
 
-- Prisma Studio: <http://localhost:5555>
 - pgAdmin: <http://localhost:5050> (ใช้ `PGADMIN_DEFAULT_EMAIL` และ `PGADMIN_DEFAULT_PASSWORD` จาก `.env`)
+- Jaeger traces: <http://localhost:16686>
 
-ใน pgAdmin ให้ลงทะเบียน server โดยใช้ host `postgres`, port `5432`, maintenance database `inblack`, username `inblack` และรหัสผ่านฐานข้อมูลในเครื่อง `inblack_dev` หากเชื่อมต่อจาก pgAdmin ที่ติดตั้งบน Windows โดยตรง ให้ใช้ host `localhost` และ port `5433` ดูและแก้ไขแถวข้อมูลได้ที่ **Databases → inblack → Schemas → public → Tables** โมเดล Prisma อยู่ใน `backend/prisma/schema.prisma`; การเปลี่ยนแปลงฐานข้อมูลควรทำผ่าน SQL migration ใน `backend/migrations` ไม่ใช่ `prisma db push`
+ไฟล์ `pgadmin/servers.json` เตรียมค่า server `InBlack Top-Up (Docker)` ให้ pgAdmin โดยใช้ host `postgres`, port `5432`, maintenance database `inblack` และ username `inblack` หาก server ยังไม่แสดงใน pgAdmin ที่มีข้อมูลการตั้งค่าเดิม ให้เพิ่ม server ด้วยค่าดังกล่าวแล้วกรอกรหัสผ่านฐานข้อมูลในเครื่อง `inblack_dev` เมื่อระบบถาม หากใช้ pgAdmin 4 ที่ติดตั้งบน Windows โดยตรง ให้ใช้ host `localhost` และ port `5433` การเข้า pgAdmin ใช้บัญชี `PGADMIN_DEFAULT_EMAIL` และ `PGADMIN_DEFAULT_PASSWORD` ซึ่งเป็นคนละบัญชีกับฐานข้อมูล ดูและแก้ไขแถวข้อมูลได้ที่ **Databases → inblack → Schemas → public → Tables** การเปลี่ยนแปลงฐานข้อมูลควรทำผ่าน SQL migration ใน `backend/migrations`
 
 ค่า PostgreSQL และ SMTP เริ่มต้นใช้สำหรับพัฒนาในเครื่อง หากต้องการรับ OTP ที่กล่องอีเมลจริง ให้ตั้งค่า SMTP host, port, username, app password, secure mode และ sender ของผู้ให้บริการในไฟล์ `.env` ที่ไม่ถูกติดตามด้วย Git แล้วสร้าง API containers ใหม่:
 
@@ -45,8 +45,9 @@ docker compose up -d --force-recreate api-1 api-2
 | `worker` | ตรวจคำสั่งซื้อหมดอายุ ลองทำงานซ้ำ และดำเนินการเติมเกม |
 | `postgres`, `redis` | จัดเก็บข้อมูลระบบแบบถาวรและกระจายเหตุการณ์/จำกัดอัตราคำขอระหว่าง replica |
 | `mock-pay`, `mock-game` | ตัวจำลองผู้ให้บริการในเครื่อง |
-| `mailpit` | กล่องจดหมาย SMTP ในเครื่องสำหรับรหัสเข้าสู่ระบบและทดสอบ OTP |
-| `pgadmin`, `prisma-studio` | เครื่องมือฐานข้อมูลเสริมภายใต้ profile `tools` |
+| `mailpit` | กล่องจดหมาย SMTP ในเครื่องสำหรับ OTP และใบเสร็จ |
+| `jaeger` | รับ OpenTelemetry traces จาก API, worker และ mock providers |
+| `pgadmin` | เครื่องมือจัดการฐานข้อมูล PostgreSQL ภายใต้ profile `tools` |
 
 ## ทดสอบ
 
@@ -68,7 +69,7 @@ docker compose up -d --force-recreate api-1 api-2
 - กระทบยอด CSV กับเหตุการณ์ชำระเงินภายใน โดยบันทึกแถวที่ตรงกัน/ขาดหาย/ไม่ตรงกันไว้เพื่อตรวจสอบ
 - Backend unit/integration tests สำหรับ purchase limits, idempotency, concurrency, refunds และ RBAC, Playwright browser E2E coverage และ GitHub Actions workflow สำหรับ Compose stack
 
-ก่อนส่งงานจริง ควรตรวจผล benchmark เทียบกับเกณฑ์ p95 ในเอกสารโจทย์ และตรวจทาน OpenAPI กับทุก endpoint ที่เปิดใช้จริง
+ตัว benchmark วัด endpoint รายการและรายการที่กรองสถานะ/วันที่ด้วยข้อมูล 100,000 orders, 100 requests ต่อ endpoint และ warm-up 10 requests โดยตรวจว่า p95 ต่ำกว่า 200 ms ตามเกณฑ์ในโจทย์ ผลทดสอบล่าสุดคือ p95 7.35 ms สำหรับรายการ และ 7.18 ms สำหรับรายการที่กรอง สภาพแวดล้อมเครื่องอื่นอาจให้ผลต่างกัน
 
 กำหนดกล่องอีเมลผู้ดูแลระบบที่เชื่อถือได้อย่างน้อยหนึ่งรายการใน `ADMIN_EMAILS` ก่อนเข้าสู่ระบบ การนำอีเมลออกจาก allowlist จะเพิกถอนสิทธิ์ผู้ดูแลเมื่อมีคำขอ API ครั้งถัดไป ตั้ง `COOKIE_SECURE=true` เมื่อให้บริการผ่าน HTTPS หากใช้ SMTP ภายนอก ให้กำหนด `MAIL_HOST`, `MAIL_PORT`, `MAIL_USER`, `MAIL_PASSWORD`, `MAIL_SECURE` และ `MAIL_FROM`
 
@@ -79,7 +80,6 @@ docker compose up -d --force-recreate api-1 api-2
 - `backend/migrations/002_auth_admin_reconciliation.sql`: migration เพิ่มเติมสำหรับ auth, audit และ reconciliation schema
 - `backend/migrations/003_purchase_limits.sql` ถึง `backend/migrations/005_backend_requirements.sql`: ขีดจำกัดการซื้อ, คำขอคืนเงิน และข้อกำหนดฝั่ง backend
 - `backend/scripts/seed-orders.js`, `backend/scripts/benchmark-admin-orders.js`: สร้างข้อมูลและวัด p95 ของหน้ารายการผู้ดูแล
-- `backend/prisma/schema.prisma`: โมเดล Prisma Studio ที่ map กับตาราง PostgreSQL
 - `backend/auth.js`, `backend/reconciliation.js`: ส่วนประกอบ OTP/session และตัวแยกวิเคราะห์/เปรียบเทียบ CSV สำหรับ settlement
 - `backend/worker.js`: worker ตรวจหมดอายุและดำเนินการเติมสินค้า
 - `backend/mock.js`: ตัวจำลองผู้ให้บริการชำระเงินและเกม

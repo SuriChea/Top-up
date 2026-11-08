@@ -28,7 +28,7 @@ export default function AuthForm() {
     setError("");
     setMessage("");
     try {
-      const response = await fetch("/api/v1/auth/request-otp", {
+      const response = await fetch("/api/v1/auth/otp/request", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email })
@@ -51,7 +51,7 @@ export default function AuthForm() {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/v1/auth/verify-otp", {
+      const response = await fetch("/api/v1/auth/otp/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email, code })
@@ -83,7 +83,7 @@ export default function AuthForm() {
       <section className="auth-panel">
         <p className="eyebrow">SECURE SIGN IN</p>
         <h1>{english ? "Sign in with email" : "เข้าสู่ระบบด้วยอีเมล"}</h1>
-        <p className="muted-copy">{english ? "We’ll email you a one-time code that expires in 10 minutes." : "เราจะส่งรหัส OTP ที่ใช้ได้ครั้งเดียวและหมดอายุใน 10 นาที"}</p>
+        <p className="muted-copy">{english ? "We’ll email you a one-time code that expires in 5 minutes." : "เราจะส่งรหัส OTP ที่ใช้ได้ครั้งเดียวและหมดอายุใน 5 นาที"}</p>
         {!sent ? (
           <form className="auth-form" onSubmit={requestCode}>
             <label className="field-label" htmlFor="login-email">{english ? "Email" : "อีเมล"}</label>

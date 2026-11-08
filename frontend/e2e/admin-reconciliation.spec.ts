@@ -3,6 +3,11 @@ import { expect, test, type Page } from "@playwright/test";
 const mailpitUrl = process.env.MAILPIT_API_URL || "http://127.0.0.1:8025";
 const adminEmail = process.env.E2E_ADMIN_EMAIL || "admin@example.com";
 
+test.beforeEach(async ({ request }) => {
+  const response = await request.post("/api/v1/_test/reset");
+  expect(response.ok()).toBe(true);
+});
+
 async function getOtp(email: string) {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
@@ -27,6 +32,9 @@ async function getOtp(email: string) {
 
 async function finishSignIn(page: Page, email: string, locale: "en" | "th") {
   const english = locale === "en";
+  await expect(page.getByText(english
+    ? "We’ll email you a one-time code that expires in 5 minutes."
+    : "เราจะส่งรหัส OTP ที่ใช้ได้ครั้งเดียวและหมดอายุใน 5 นาที")).toBeVisible();
   await page.getByLabel(english ? "Email" : "อีเมล").fill(email);
   await page.getByRole("button", { name: english ? "Send OTP" : "ส่งรหัส OTP" }).click();
   await expect(page.getByRole("status")).toContainText(email);
@@ -109,9 +117,9 @@ test("OTP login, customer RBAC, admin operations, refund, and settlement reconci
 
   const orderResponse = await page.evaluate(async (id) => {
     const response = await fetch("/api/v1/admin/orders");
-    const orders = await response.json() as Array<{ id: string; totalSatang: number; status: string }>;
+    const orderPage = await response.json() as { orders: Array<{ id: string; totalSatang: number; status: string }> };
     if (!response.ok) throw new Error("Admin order list failed");
-    const order = orders.find((item) => item.id === id);
+    const order = orderPage.orders.find((item) => item.id === id);
     if (!order) throw new Error("Created order is missing from admin list");
     return order;
   }, orderId);
@@ -125,8 +133,8 @@ test("OTP login, customer RBAC, admin operations, refund, and settlement reconci
   await expect(page.getByRole("status")).toContainText("เข้าคิวแล้ว");
   await expect.poll(async () => page.evaluate(async (id) => {
     const response = await fetch("/api/v1/admin/orders");
-    const orders = await response.json() as Array<{ id: string; status: string }>;
-    return orders.find((item) => item.id === id)?.status;
+    const orderPage = await response.json() as { orders: Array<{ id: string; status: string }> };
+    return orderPage.orders.find((item) => item.id === id)?.status;
   }, orderId), { timeout: 30_000 }).toBe("REFUNDED");
 
   const csv = [
@@ -244,7 +252,7 @@ test("checkout login gate, persistent English locale, purchase limits, account h
   await expect(page.getByRole("status")).toContainText("Refund approved");
   await expect.poll(async () => page.evaluate(async (id) => {
     const response = await fetch("/api/v1/admin/orders");
-    const orders = await response.json() as Array<{ id: string; status: string }>;
-    return orders.find((item) => item.id === id)?.status;
+    const orderPage = await response.json() as { orders: Array<{ id: string; status: string }> };
+    return orderPage.orders.find((item) => item.id === id)?.status;
   }, monthlyOrder), { timeout: 30_000 }).toBe("REFUNDED");
 });

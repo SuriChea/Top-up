@@ -44,6 +44,8 @@ services:
       PORT: 3001
       DATABASE_URL: postgres://inblack:inblack_dev@postgres:5432/inblack
       REDIS_URL: redis://redis:6379
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      OTEL_SERVICE_NAME: inblack-api
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-whsec_test_inblackm_2026}
       TRACKING_TOKEN_SECRET: ${TRACKING_TOKEN_SECRET:-local_tracking_secret_replace_me}
       AUTH_SECRET: ${AUTH_SECRET:-local_auth_secret_replace_me}
@@ -98,8 +100,15 @@ services:
     command: ["node", "worker.js"]
     environment:
       <<: *backend-env
+      OTEL_SERVICE_NAME: inblack-worker
       WORKER_MAX_ATTEMPTS: ${WORKER_MAX_ATTEMPTS:-8}
-    depends_on: *backend-depends
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api-1:
+        condition: service_healthy
     restart: unless-stopped
 
   mock-pay:
@@ -108,6 +117,8 @@ services:
     environment:
       MOCK_KIND: pay
       PORT: 4001
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      OTEL_SERVICE_NAME: inblack-mock-pay
       DATABASE_URL: postgres://inblack:inblack_dev@postgres:5432/inblack
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-whsec_test_inblackm_2026}
       API_URL: http://proxy:8080
@@ -132,6 +143,8 @@ services:
     environment:
       MOCK_KIND: game
       PORT: 4002
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      OTEL_SERVICE_NAME: inblack-mock-game
       DATABASE_URL: postgres://inblack:inblack_dev@postgres:5432/inblack
       FAIL_RATE: ${FAIL_RATE:-0}
       TIMEOUT_RATE: ${TIMEOUT_RATE:-0}
@@ -184,6 +197,16 @@ services:
       - "${MAILPIT_SMTP_PORT:-1025}:1025"
     restart: unless-stopped
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      - "${OTEL_GRPC_PORT:-4317}:4317"
+      - "${OTEL_HTTP_PORT:-4318}:4318"
+    restart: unless-stopped
+
   pgadmin:
     image: dpage/pgadmin4:8
     profiles: ["tools"]
@@ -191,6 +214,7 @@ services:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-local_pgadmin_password}
       PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
     ports:
       - "${PGADMIN_PORT:-5050}:80"
     depends_on:
@@ -198,20 +222,7 @@ services:
         condition: service_healthy
     volumes:
       - pgadmin-data:/var/lib/pgadmin
-    restart: unless-stopped
-
-  prisma-studio:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prisma
-    profiles: ["tools"]
-    environment:
-      DATABASE_URL: ${PRISMA_DATABASE_URL:-postgresql://inblack:inblack_dev@postgres:5432/inblack?schema=public}
-    ports:
-      - "${PRISMA_STUDIO_PORT:-5555}:5555"
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
     restart: unless-stopped
 
 volumes:

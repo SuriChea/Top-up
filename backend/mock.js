@@ -1,7 +1,10 @@
+require("./tracing");
+
 const crypto = require("node:crypto");
 const cors = require("cors");
 const express = require("express");
 const { Pool } = require("pg");
+const { trace } = require("@opentelemetry/api");
 
 const app = express();
 const kind = process.env.MOCK_KIND;
@@ -11,8 +14,33 @@ const paymentSecret = process.env.PAYMENT_WEBHOOK_SECRET || "whsec_test_inblackm
 const apiUrl = process.env.API_URL || "http://api-1:3001";
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+function activeTraceId() {
+  const traceId = trace.getActiveSpan()?.spanContext().traceId;
+  return traceId && traceId !== "00000000000000000000000000000000" ? traceId : null;
+}
+
 app.use(cors({ origin: process.env.WEB_ORIGIN || true }));
 app.use(express.json({ limit: "1mb" }));
+app.use((req, res, next) => {
+  const startedAt = process.hrtime.bigint();
+  const suppliedId = req.get("x-request-id");
+  const requestId = suppliedId && /^[\w.-]{1,128}$/.test(suppliedId) ? suppliedId : crypto.randomUUID();
+  res.set("x-request-id", requestId);
+  res.once("finish", () => {
+    console.log(JSON.stringify({
+      level: "info",
+      message: "http_request",
+      service: `mock-${kind}`,
+      request_id: requestId,
+      trace_id: activeTraceId(),
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration_ms: Math.round(Number(process.hrtime.bigint() - startedAt) / 1e6)
+    }));
+  });
+  next();
+});
 app.get("/healthz", (_req, res) => res.json({ status: "ok", service: `mock-${kind}` }));
 
 async function deliverWebhook(body) {
@@ -66,7 +94,12 @@ if (kind === "pay") {
         try {
           for (let i = 0; i < repeat; i += 1) await deliverWebhook(body);
         } catch (error) {
-          console.error(JSON.stringify({ level: "error", message: "mock_webhook_failed", error: error.message }));
+          console.error(JSON.stringify({
+            level: "error",
+            message: "mock_webhook_failed",
+            trace_id: activeTraceId(),
+            error: error.message
+          }));
         }
       }, wait);
       return res.status(202).json({ status: "accepted", eventId: body.event_id, mode });
