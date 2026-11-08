@@ -47,6 +47,7 @@ export default function SiteHeader() {
       if (!response.ok) throw new Error(`Logout returned HTTP ${response.status}`);
       setUser(null);
       window.dispatchEvent(new Event("inblack:auth-changed"));
+      router.replace(localizedPath("/", locale));
       router.refresh();
     } catch (error) {
       console.error("Could not sign out", error);
@@ -63,13 +64,7 @@ export default function SiteHeader() {
         {user && <a href={localizedPath("/account", locale)}>{isEnglish ? "My account" : "บัญชีของฉัน"}</a>}
         {user && ["admin", "viewer", "support", "finance", "superadmin"].includes(user.role) &&
           <a href={localizedPath("/admin", locale)}>{isEnglish ? "Admin" : "ผู้ดูแล"}</a>}
-        {!user && <a
-          href={`${localizedPath("/login", locale)}?next=${encodeURIComponent(pathname)}`}
-          onClick={(event) => {
-            event.preventDefault();
-            router.push(`${localizedPath("/login", locale)}?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-          }}
-        >{isEnglish ? "Sign in" : "เข้าสู่ระบบ"}</a>}
+        {!user && <a href={localizedPath("/login", locale)}>{isEnglish ? "Sign in" : "เข้าสู่ระบบ"}</a>}
         {user && <button className="header-logout" onClick={logout}>{isEnglish ? "Sign out" : "ออกจากระบบ"}</button>}
         <button
           className="language-switch"

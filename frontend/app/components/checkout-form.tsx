@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { readOrderEvents, type OrderEvent, customerStatus } from "./order-events";
 import { localizedPath, useLocale } from "./locale";
@@ -34,8 +34,6 @@ function formatBaht(satang: number | bigint) {
 export default function CheckoutForm({ sku }: { sku: string }) {
   const locale = useLocale();
   const english = locale === "en";
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
   const router = useRouter();
   const [product, setProduct] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState(1);
@@ -161,7 +159,7 @@ export default function CheckoutForm({ sku }: { sku: string }) {
       });
       const body = await response.json() as Order & Problem;
       if (response.status === 401) {
-        router.push(`${localizedPath("/login", locale)}?next=${encodeURIComponent(pathname + (searchParams.size ? `?${searchParams.toString()}` : ""))}`);
+        router.push(localizedPath("/login", locale));
         return;
       }
       if (!response.ok) throw new Error(body.detail || "สร้างคำสั่งซื้อไม่สำเร็จ");
@@ -204,14 +202,13 @@ export default function CheckoutForm({ sku }: { sku: string }) {
     return <main className="page-shell"><div className="empty-state" role="status">{english ? "Loading…" : "กำลังโหลดสินค้า…"}</div></main>;
   }
   if (!signedIn && !problem) {
-    const checkoutPath = `${pathname}${searchParams.size ? `?${searchParams.toString()}` : ""}`;
     return (
       <main className="page-shell">
         <section className="auth-panel">
           <p className="eyebrow">SECURE CHECKOUT</p>
           <h1>{english ? "Sign in before checkout" : "กรุณาเข้าสู่ระบบก่อนชำระเงิน"}</h1>
           <p className="muted-copy">{english ? "Sign in with your email to continue and view your purchases later." : "เข้าสู่ระบบด้วยอีเมลก่อน เพื่อดำเนินการซื้อและดูประวัติภายหลัง"}</p>
-          <Link className="button button-primary button-wide" href={`${localizedPath("/login", locale)}?next=${encodeURIComponent(checkoutPath)}`}>
+          <Link className="button button-primary button-wide" href={localizedPath("/login", locale)}>
             {english ? "Sign in to continue" : "เข้าสู่ระบบเพื่อดำเนินการต่อ"}
           </Link>
         </section>

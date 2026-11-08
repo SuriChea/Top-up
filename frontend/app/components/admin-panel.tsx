@@ -106,7 +106,7 @@ export default function AdminPanel() {
       setRefundRequests(nextRefundRequests);
     } catch (error) {
       if (error instanceof Error && error.message.includes("Sign in")) {
-        router.replace(`${localizedPath("/login", locale)}?next=${encodeURIComponent(localizedPath("/admin", locale))}`);
+        router.replace(localizedPath("/login", locale));
         return;
       }
       setProblem(error instanceof Error ? error.message : "โหลดข้อมูลผู้ดูแลไม่สำเร็จ");
@@ -275,7 +275,9 @@ export default function AdminPanel() {
       setProblem("ออกจากระบบไม่สำเร็จ");
       return;
     }
-    router.replace(localizedPath("/login", locale));
+    window.dispatchEvent(new Event("inblack:auth-changed"));
+    router.replace(localizedPath("/", locale));
+    router.refresh();
   }
 
   const canEditProducts = role === "admin" || role === "superadmin";

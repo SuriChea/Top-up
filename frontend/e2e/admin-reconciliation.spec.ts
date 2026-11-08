@@ -84,20 +84,19 @@ test("OTP login, customer RBAC, admin operations, refund, and settlement reconci
   const customerEmail = `customer-${suffix}@example.test`;
 
   await signIn(page, customerEmail);
-  await expect(page).toHaveURL(/\/th\/account$/);
+  await expect(page).toHaveURL(/\/th$/);
   await expect(page.getByRole("button", { name: "ออกจากระบบ" })).toBeVisible();
   const forbidden = await page.evaluate(async () => {
     const response = await fetch("/api/v1/admin/orders");
     return response.status;
   });
   expect(forbidden).toBe(403);
-  await page.evaluate(async () => {
-    const response = await fetch("/api/v1/auth/logout", { method: "POST" });
-    if (!response.ok) throw new Error("Customer logout failed");
-  });
+  await page.getByRole("button", { name: "ออกจากระบบ" }).click();
+  await expect(page).toHaveURL(/\/th$/);
 
   await signIn(page, adminEmail);
-  await expect(page).toHaveURL(/\/th\/admin$/);
+  await expect(page).toHaveURL(/\/th$/);
+  await page.goto("/admin");
   await expect(page.getByRole("heading", { name: "Admin dashboard" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "สินค้าและสต็อก" })).toBeVisible();
 
@@ -202,9 +201,10 @@ test("checkout login gate, persistent English locale, purchase limits, account h
 
   await page.getByRole("link", { name: "เข้าสู่ระบบเพื่อดำเนินการต่อ" }).click();
   await finishSignIn(page, customerEmail, "th");
-  await expect(page).toHaveURL(/\/th\/checkout\?sku=MONTHLY-PASS$/);
+  await expect(page).toHaveURL(/\/th$/);
   await expect(page.getByRole("button", { name: "ออกจากระบบ" })).toBeVisible();
 
+  await page.goto("/th/checkout?sku=MONTHLY-PASS");
   await page.getByRole("button", { name: "Switch language to English" }).click();
   await expect(page).toHaveURL(/\/en\/checkout\?sku=MONTHLY-PASS$/);
   await expect(page.getByRole("heading", { name: "Confirm your pack" })).toBeVisible();
@@ -241,8 +241,10 @@ test("checkout login gate, persistent English locale, purchase limits, account h
   await expect(monthlyRow).toContainText("Under review");
 
   await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page).toHaveURL(/\/en$/);
   await signIn(page, adminEmail, "en");
-  await expect(page).toHaveURL(/\/en\/admin$/);
+  await expect(page).toHaveURL(/\/en$/);
+  await page.goto("/en/admin");
   const refundSection = page.locator(".admin-card").filter({
     has: page.getByRole("heading", { name: "Refund requests" })
   });

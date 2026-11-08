@@ -38,7 +38,7 @@ export default function AccountPanel() {
     try {
       const meResponse = await fetch("/api/v1/auth/me", { cache: "no-store" });
       if (meResponse.status === 401) {
-        router.replace(`${localizedPath("/login", locale)}?next=${encodeURIComponent(localizedPath("/account", locale))}`);
+        router.replace(localizedPath("/login", locale));
         return;
       }
       const me = await meResponse.json() as { user?: { email: string }; detail?: string };

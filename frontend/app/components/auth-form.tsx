@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { localizedPath, useLocale } from "./locale";
 
 type AuthResponse = {
@@ -12,7 +12,6 @@ type AuthResponse = {
 
 export default function AuthForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const locale = useLocale();
   const english = locale === "en";
   const [email, setEmail] = useState("");
@@ -60,16 +59,7 @@ export default function AuthForm() {
       if (!response.ok || !body.user) throw new Error(body.detail || "รหัสยืนยันไม่ถูกต้อง");
       setMessage(english ? "Signed in successfully." : "เข้าสู่ระบบสำเร็จ");
       window.dispatchEvent(new Event("inblack:auth-changed"));
-      const requestedPath = searchParams.get("next");
-      const nextPath = requestedPath?.startsWith("/") && !requestedPath.startsWith("//")
-        ? requestedPath
-        : localizedPath(
-          ["admin", "viewer", "support", "finance", "superadmin"].includes(body.user.role)
-            ? "/admin"
-            : "/account",
-          locale
-        );
-      router.push(nextPath);
+      router.replace(localizedPath("/", locale));
       router.refresh();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "เข้าสู่ระบบไม่สำเร็จ");
