@@ -39,10 +39,13 @@ async function expireOrders() {
        ORDER BY expires_at FOR UPDATE SKIP LOCKED LIMIT 20`
     );
     for (const order of orders.rows) {
-      await client.query("UPDATE products SET stock = stock + $1 WHERE sku = $2 AND stock <> -1", [
-        order.quantity,
-        order.sku
-      ]);
+      const items = await client.query("SELECT sku, quantity FROM order_items WHERE order_id = $1", [order.id]);
+      for (const item of items.rows.length ? items.rows : [{ sku: order.sku, quantity: order.quantity }]) {
+        await client.query("UPDATE products SET stock = stock + $1 WHERE sku = $2 AND stock <> -1", [
+          item.quantity,
+          item.sku
+        ]);
+      }
       if (order.discount_code) {
         await client.query(
           "UPDATE discount_codes SET uses_count = GREATEST(0, uses_count - 1) WHERE code = $1",
@@ -123,32 +126,45 @@ async function processJob(job) {
   let event;
   const retryEvents = [];
   try {
-    const orderResult = await client.query("SELECT game_reference FROM orders WHERE id = $1", [job.order_id]);
-    if (!orderResult.rows[0]) throw new Error("Order disappeared before fulfillment");
+    const itemsResult = await client.query(
+      `SELECT sku, product_name, player_id, quantity, game_reference
+       FROM order_items WHERE order_id = $1 ORDER BY sku`,
+      [job.order_id]
+    );
+    const items = itemsResult.rows.length ? itemsResult.rows : [{
+      sku: job.sku,
+      product_name: null,
+      player_id: job.player_id,
+      quantity: job.quantity,
+      game_reference: `${job.order_id}:${job.sku}`
+    }];
+    if (!items.length) throw new Error("Order has no fulfillment items");
 
-    let delivery = await getTopup(job.order_id);
-    if (!delivery || delivery.status !== "succeeded") {
-      const response = await fetch(`${gameUrl}/topups`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          reference: job.order_id,
-          game_uid: job.player_id,
-          sku: job.sku,
-          qty: job.quantity
-        }),
-        signal: AbortSignal.timeout(5000)
-      });
-      if (!response.ok) throw new Error(`Mock game returned HTTP ${response.status}`);
-      delivery = await response.json();
-      if (delivery.status !== "succeeded") throw new Error("Game top-up was not confirmed");
+    for (const item of items) {
+      let delivery = await getTopup(item.game_reference);
+      if (!delivery || delivery.status !== "succeeded") {
+        const response = await fetch(`${gameUrl}/topups`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            reference: item.game_reference,
+            game_uid: item.player_id,
+            sku: item.sku,
+            qty: item.quantity
+          }),
+          signal: AbortSignal.timeout(5000)
+        });
+        if (!response.ok) throw new Error(`Mock game returned HTTP ${response.status} for ${item.sku}`);
+        delivery = await response.json();
+        if (delivery.status !== "succeeded") throw new Error(`Game top-up was not confirmed for ${item.sku}`);
+      }
     }
 
     await client.query("BEGIN");
     const lockedOrder = await client.query("SELECT status FROM orders WHERE id = $1 FOR UPDATE", [job.order_id]);
     await client.query(
       "UPDATE orders SET game_reference = $2 WHERE id = $1",
-      [job.order_id, delivery.reference]
+      [job.order_id, items.map((item) => item.game_reference).join(",")]
     );
     await client.query("UPDATE fulfillment_jobs SET status = 'done', locked_at = NULL WHERE id = $1", [job.id]);
     if (lockedOrder.rows[0] && ["IN_PROGRESS", "IN_QUEUE"].includes(lockedOrder.rows[0].status)) {
@@ -206,13 +222,36 @@ async function processRefund() {
   try {
     await client.query("BEGIN");
     const result = await client.query(
-      `SELECT id, order_id, amount_satang FROM refund_jobs
-       WHERE status IN ('queued', 'retry') AND run_after <= NOW()
-       ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1`
+      `SELECT r.id, r.order_id, r.amount_satang, o.total_satang, o.refunded_satang
+       FROM refund_jobs r JOIN orders o ON o.id = r.order_id
+       WHERE r.status IN ('queued', 'retry') AND r.run_after <= NOW()
+       ORDER BY r.id FOR UPDATE OF r, o SKIP LOCKED LIMIT 1`
     );
     refund = result.rows[0];
     if (!refund) {
       await client.query("COMMIT");
+      return;
+    }
+    const pending = await client.query(
+      `SELECT COALESCE(SUM(amount_satang), 0)::bigint AS amount
+       FROM refund_jobs WHERE order_id = $1 AND status IN ('queued', 'in_progress', 'retry')`,
+      [refund.order_id]
+    );
+    if (BigInt(refund.amount_satang) + BigInt(refund.refunded_satang) >
+        BigInt(refund.total_satang) ||
+        BigInt(pending.rows[0].amount) + BigInt(refund.refunded_satang) >
+        BigInt(refund.total_satang)) {
+      await client.query(
+        "UPDATE refund_jobs SET status = 'dead', last_error = 'Refund exceeds remaining paid balance' WHERE id = $1",
+        [refund.id]
+      );
+      await client.query("COMMIT");
+      console.error(JSON.stringify({
+        level: "error",
+        message: "refund_job_exceeds_remaining_balance",
+        order_id: refund.order_id,
+        refund_job_id: refund.id
+      }));
       return;
     }
     await client.query(
@@ -223,11 +262,18 @@ async function processRefund() {
     const response = await fetch(`${payUrl}/refund`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ orderId: refund.order_id, amountSatang: Number(refund.amount_satang) }),
+      body: JSON.stringify({
+        refundId: String(refund.id),
+        orderId: refund.order_id,
+        amountSatang: Number(refund.amount_satang)
+      }),
       signal: AbortSignal.timeout(5000)
     });
     if (!response.ok) throw new Error(`Payment refund returned HTTP ${response.status}`);
-    await pool.query("UPDATE refund_jobs SET status = 'done' WHERE id = $1", [refund.id]);
+    await pool.query(
+      "UPDATE refund_jobs SET status = 'done', completed_at = NOW() WHERE id = $1",
+      [refund.id]
+    );
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     if (refund) {

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { customerStatus, readOrderEvents, type OrderEvent } from "./order-events";
+import { localizedPath, useLocale } from "./locale";
 
 type TrackedOrder = {
   id: string;
@@ -27,6 +28,8 @@ function formatBaht(satang: number) {
 }
 
 export default function TrackingPanel({ initialId }: { initialId: string }) {
+  const locale = useLocale();
+  const english = locale === "en";
   const [id, setId] = useState(initialId);
   const [email, setEmail] = useState("");
   const [tracking, setTracking] = useState<TrackingResponse | null>(null);
@@ -79,21 +82,21 @@ export default function TrackingPanel({ initialId }: { initialId: string }) {
 
   return (
     <main className="page-shell tracking-layout">
-      <Link className="back-link" href="/th">← กลับไปหน้าร้าน</Link>
+      <Link className="back-link" href={localizedPath("/", locale)}>← {english ? "Back to shop" : "กลับไปหน้าร้าน"}</Link>
       <section className="tracking-panel">
         <div className="panel-heading">
           <p className="eyebrow">ORDER TRACKING</p>
-          <h1>ติดตามคำสั่งซื้อ</h1>
-          <p>กรอกเลขคำสั่งซื้อและอีเมลที่ใช้ซื้อ เราจะอัปเดตสถานะแบบเรียลไทม์</p>
+          <h1>{english ? "Track your order" : "ติดตามคำสั่งซื้อ"}</h1>
+          <p>{english ? "Enter the order number and purchase email for live status updates." : "กรอกเลขคำสั่งซื้อและอีเมลที่ใช้ซื้อ เราจะอัปเดตสถานะแบบเรียลไทม์"}</p>
         </div>
         <form className="tracking-form" onSubmit={trackOrder} noValidate>
-          <label className="field-label" htmlFor="order-id">เลขคำสั่งซื้อ</label>
+          <label className="field-label" htmlFor="order-id">{english ? "Order number" : "เลขคำสั่งซื้อ"}</label>
           <input id="order-id" value={id} onChange={(event) => setId(event.target.value)} placeholder="ORD-2587965432159-229" aria-describedby="order-id-hint" required />
-          <span className="field-hint" id="order-id-hint">รูปแบบ ORD-XXXXXXXXXXXXX-CCC พร้อม checksum ที่ถูกต้อง</span>
-          <label className="field-label" htmlFor="tracking-email">อีเมลที่ใช้สั่งซื้อ</label>
+          <span className="field-hint" id="order-id-hint">{english ? "Use ORD-XXXXXXXXXXXXX-CCC with a valid checksum." : "รูปแบบ ORD-XXXXXXXXXXXXX-CCC พร้อม checksum ที่ถูกต้อง"}</span>
+          <label className="field-label" htmlFor="tracking-email">{english ? "Purchase email" : "อีเมลที่ใช้สั่งซื้อ"}</label>
           <input id="tracking-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
           <button className="button button-primary button-wide" type="submit" disabled={busy}>
-            {busy ? "กำลังค้นหา…" : "ค้นหาคำสั่งซื้อ"}
+            {busy ? (english ? "Searching…" : "กำลังค้นหา…") : (english ? "Find order" : "ค้นหาคำสั่งซื้อ")}
           </button>
         </form>
 
@@ -101,23 +104,23 @@ export default function TrackingPanel({ initialId }: { initialId: string }) {
         {tracking && (
           <section className="tracking-result" aria-live="polite">
             <div className="tracking-order-card">
-              <span className="field-hint">คำสั่งซื้อ {tracking.order.id}</span>
+              <span className="field-hint">{english ? "Order" : "คำสั่งซื้อ"} {tracking.order.id}</span>
               <h2>{tracking.order.productName} <span>× {tracking.order.quantity}</span></h2>
               <div className="tracking-order-meta">
                 <strong>{formatBaht(tracking.order.totalSatang)}</strong>
-                <span className={`status-badge status-${customerStatus(tracking.order.status).tone}`}>{customerStatus(tracking.order.status).label}</span>
+                <span className={`status-badge status-${customerStatus(tracking.order.status, locale).tone}`}>{customerStatus(tracking.order.status, locale).label}</span>
               </div>
             </div>
             <div className="timeline">
-              <div className="timeline-heading"><h2>ความคืบหน้า</h2><span className="live-indicator"><i /> LIVE</span></div>
-              {events.length === 0 && <p className="field-hint">กำลังรอสถานะจากระบบ…</p>}
+              <div className="timeline-heading"><h2>{english ? "Progress" : "ความคืบหน้า"}</h2><span className="live-indicator"><i /> LIVE</span></div>
+              {events.length === 0 && <p className="field-hint">{english ? "Waiting for updates…" : "กำลังรอสถานะจากระบบ…"}</p>}
               {events.map((event) => (
                 <div className="timeline-item" key={event.id}>
                   <span className="timeline-dot" />
                   <div>
-                    <strong>{customerStatus(event.status).label}</strong>
+                    <strong>{customerStatus(event.status, locale).label}</strong>
                     <p>{event.reason}</p>
-                    <time>{new Date(event.created_at).toLocaleString("th-TH")}</time>
+                    <time>{new Date(event.created_at).toLocaleString(english ? "en-US" : "th-TH")}</time>
                   </div>
                 </div>
               ))}

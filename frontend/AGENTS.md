@@ -1,9 +1,9 @@
 <!-- BEGIN:nextjs-agent-rules -->
 
-## This is NOT the Next.js you know
+## Next.js เวอร์ชันนี้อาจแตกต่างจากที่คุณคุ้นเคย
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+เวอร์ชันนี้มีการเปลี่ยนแปลงที่อาจทำให้โค้ดเดิมใช้งานไม่ได้ — API, รูปแบบการเขียน และโครงสร้างไฟล์อาจต่างจากข้อมูลที่คุณเคยเรียนรู้ ก่อนเขียนโค้ดให้อ่านคู่มือที่เกี่ยวข้องใน `node_modules/next/dist/docs/` (อ้างอิงตำแหน่งจากโฟลเดอร์ของไฟล์นี้; ใน monorepo อาจไม่พบแพ็กเกจ `next` จากโฟลเดอร์หลักของ repository) และปฏิบัติตามประกาศ deprecation
 
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+ข้อความส่วนนี้ถูกเขียนและเพิ่มกลับโดย `next dev` — ตรวจสอบได้ที่ `node_modules/next/dist/server/lib/generate-agent-files.js` การลบข้อความนี้ออกจาก diff จะทำให้เกิดการเปลี่ยนแปลงที่ยังไม่ commit ขึ้นมาใหม่ การ commit ไฟล์นี้ไปพร้อมกับงานจะทำให้ working tree สะอาด
 
 <!-- END:nextjs-agent-rules -->

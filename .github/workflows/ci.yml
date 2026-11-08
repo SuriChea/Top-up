@@ -9,11 +9,17 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ADMIN_EMAILS: admin@example.test
+      VIEWER_EMAILS: viewer@example.test
+      SUPPORT_EMAILS: support@example.test
+      FINANCE_EMAILS: finance@example.test
+      SUPERADMIN_EMAILS: superadmin@example.test
+      APP_ENV: test
       E2E_ADMIN_EMAIL: admin@example.test
       WEB_ORIGIN: http://localhost:3000
       AUTH_SECRET: ci-auth-secret-0123456789-0123456789
       TRACKING_TOKEN_SECRET: ci-tracking-secret-0123456789
       PAYMENT_WEBHOOK_SECRET: ci-webhook-secret
+      DATABASE_URL: postgresql://inblack:inblack_dev@localhost:5433/inblack?schema=public
       E2E_BASE_URL: http://localhost:3000
       MAILPIT_API_URL: http://127.0.0.1:8025
     steps:
@@ -26,6 +32,7 @@ jobs:
             backend/package-lock.json
             frontend/package-lock.json
       - run: npm ci --prefix backend
+      - run: npx --prefix backend prisma validate --schema backend/prisma/schema.prisma
       - run: npm test --prefix backend
       - run: npm ci --prefix frontend
       - run: npm run lint --prefix frontend
@@ -36,7 +43,10 @@ jobs:
       - name: Wait for services
         run: |
           curl --retry 40 --retry-connrefused --retry-delay 2 --fail http://localhost:3000/ >/dev/null
+          curl --retry 40 --retry-connrefused --retry-delay 2 --fail http://localhost:8080/healthz >/dev/null
           curl --retry 40 --retry-connrefused --retry-delay 2 --fail http://127.0.0.1:8025/api/v1/messages >/dev/null
+      - name: Backend integration tests
+        run: RUN_INTEGRATION_TESTS=1 npm test --prefix backend
       - run: npm run test:e2e --prefix frontend
       - name: Show service logs on failure
         if: failure()

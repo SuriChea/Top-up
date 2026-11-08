@@ -1,7 +1,7 @@
-# SEO notes
+# หมายเหตุด้าน SEO
 
-- Thai and English catalog URLs are `/th` and `/en`; both declare reciprocal language alternates.
-- The sitemap includes only those public catalog pages.
-- `robots.txt` disallows checkout, tracking, customer-order, and admin paths. Tracking and checkout set `noindex`.
-- Product names and prices render as text from the API. Product JSON-LD and dynamic Open Graph images are not implemented yet.
-- The catalog currently fetches fresh product data at request time. A production deployment should add bounded ISR for product metadata while keeping flash-sale stock fresh.
+- URL แค็ตตาล็อกภาษาไทยและอังกฤษคือ `/th` และ `/en` โดยทั้งสองหน้าระบุ alternate link ไปยังอีกภาษาหนึ่ง
+- sitemap มีเฉพาะหน้าแค็ตตาล็อกสาธารณะเหล่านี้
+- `robots.txt` ไม่อนุญาตให้ crawl หน้า checkout, tracking, คำสั่งซื้อของลูกค้า และหน้า admin ส่วนหน้า tracking และ checkout กำหนด `noindex`
+- ชื่อสินค้าและราคาแสดงเป็นข้อความจาก API ยังไม่ได้ทำ Product JSON-LD และภาพ Open Graph แบบ dynamic
+- แค็ตตาล็อกดึงข้อมูลสินค้าล่าสุดในเวลาที่ร้องขอ ระบบ production ควรเพิ่ม ISR แบบมีขอบเขตสำหรับ metadata ของสินค้า ขณะเดียวกันควรให้ข้อมูลสต็อก flash sale เป็นปัจจุบัน

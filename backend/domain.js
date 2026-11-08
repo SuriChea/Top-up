@@ -1,5 +1,22 @@
 const crypto = require("node:crypto");
 
+const statusTransitions = {
+  PENDING_PAYMENT: new Set(["PAID", "EXPIRED", "PAYMENT_FAILED", "NEEDS_REVIEW"]),
+  PAID: new Set(["IN_QUEUE", "REFUNDED", "NEEDS_REVIEW"]),
+  IN_QUEUE: new Set(["IN_PROGRESS", "FAILED", "REFUNDED", "NEEDS_REVIEW"]),
+  IN_PROGRESS: new Set(["IN_QUEUE", "COMPLETED", "FAILED", "REFUNDED", "NEEDS_REVIEW"]),
+  COMPLETED: new Set(["REFUNDED", "NEEDS_REVIEW"]),
+  EXPIRED: new Set(["PAID", "NEEDS_REVIEW"]),
+  PAYMENT_FAILED: new Set(["PAID", "NEEDS_REVIEW"]),
+  FAILED: new Set(["IN_QUEUE", "REFUNDED", "NEEDS_REVIEW"]),
+  NEEDS_REVIEW: new Set(["PAID", "FAILED", "REFUNDED"]),
+  REFUNDED: new Set(["NEEDS_REVIEW"])
+};
+
+function canTransitionOrder(from, to) {
+  return from === to || statusTransitions[from]?.has(to) === true;
+}
+
 function validOrderId(id) {
   const match = /^ORD-(\d{13})-(\d{3})$/.exec(id || "");
   return Boolean(match && String(Number(match[1]) % 997).padStart(3, "0") === match[2]);
@@ -56,4 +73,4 @@ function calculateTotals(unitPrices, quantities, discount, paymentMethod) {
   };
 }
 
-module.exports = { calculateTotals, newOrderId, validOrderId };
+module.exports = { calculateTotals, canTransitionOrder, newOrderId, validOrderId };

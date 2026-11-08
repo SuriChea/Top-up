@@ -64,10 +64,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 .brand { display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 900; letter-spacing: -.5px; }
 .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 12px; background: var(--accent); color: white; font-size: 20px; }
 .header-links { display: flex; align-items: center; gap: 26px; color: var(--muted); font-size: 13px; font-weight: 700; }
-.header-links a:hover, .back-link:hover, .checkout-back a:hover { color: var(--accent); }
+.header-links a:hover, .header-links button:hover, .back-link:hover, .checkout-back a:hover { color: var(--accent); }
 .header-logout { padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: inherit; font-weight: inherit; }
 .header-logout:hover { color: var(--accent); }
-.language-switch { padding: 7px 11px; border: 1px solid var(--line); border-radius: 20px; color: var(--ink); }
+.language-switch { padding: 7px 11px; border: 1px solid var(--line); border-radius: 20px; background: transparent; color: var(--ink); cursor: pointer; font: inherit; }
 
 .store-main { width: min(1120px, 87vw); margin: 0 auto; }
 .hero { position: relative; display: flex; min-height: 420px; align-items: center; justify-content: space-between; overflow: hidden; margin: 40px 0 66px; padding: 56px 8%; border: 1px solid var(--line); border-radius: 30px; background: radial-gradient(circle at 81% 36%, #dcd7ff 0, transparent 26%), linear-gradient(120deg, var(--surface) 30%, #f0efff 100%); }
@@ -197,6 +197,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 .timeline-item time { color: var(--muted); font-size: 9px; }
 .text-link { color: var(--accent-deep); font-size: 12px; font-weight: 800; }
 .tracking-layout { margin-top: 28px; }
+.purchase-limit { margin: 9px 0 0; color: var(--muted); font-size: 10px; }
+.account-layout { display: grid; gap: 20px; padding-top: 34px; padding-bottom: 60px; }
+.account-email { display: grid; gap: 4px; text-align: right; }
+.account-email span { color: var(--muted); font-size: 10px; }
+.account-email strong { font-size: 12px; overflow-wrap: anywhere; }
+.refund-request-control { display: grid; gap: 7px; min-width: 150px; }
+.refund-request-control input { min-height: 34px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.refund-request-actions { display: flex; gap: 7px; }
 .back-link { display: inline-block; margin-bottom: 15px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .tracking-result { margin-top: 20px; }
 .tracking-order-card { padding: 17px; border: 1px solid var(--line); border-radius: 14px; }

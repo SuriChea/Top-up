@@ -1,6 +1,6 @@
-# ADR 0004: Handle payment success after order expiry
+# ADR 0004: จัดการกรณีชำระเงินสำเร็จหลังคำสั่งซื้อหมดอายุ
 
-- Status: Accepted
-- Decision: For a valid, amount-matching success event on an expired order, attempt to reserve stock again. If stock remains, transition to paid and enqueue fulfillment. Otherwise create an automatic refund job and move the order to `NEEDS_REVIEW`.
-- Rationale: Never silently keep funds when the promised item cannot be supplied.
-- Consequences: The refund job retries against the mock provider. Production payment-provider refund reconciliation and voucher reservation restoration still need implementation.
+- สถานะ: ยอมรับแล้ว
+- การตัดสินใจ: เมื่อได้รับเหตุการณ์ชำระเงินสำเร็จที่ถูกต้องและยอดตรงกับคำสั่งซื้อที่หมดอายุ ให้ลองจองสต็อกอีกครั้ง หากยังมีสต็อกให้เปลี่ยนสถานะเป็นชำระแล้วและเข้าคิว fulfillment หากไม่มี ให้สร้างงานคืนเงินอัตโนมัติและเปลี่ยนคำสั่งซื้อเป็น `NEEDS_REVIEW`
+- เหตุผล: ห้ามเก็บเงินไว้โดยไม่แจ้ง หากไม่สามารถจัดหาสินค้าที่สัญญาไว้ได้
+- ผลที่ตามมา: งานคืนเงินจะลองดำเนินการกับผู้ให้บริการจำลองซ้ำ ส่วนการกระทบยอดคืนเงินกับผู้ให้บริการชำระเงินจริงและการคืนการจอง voucher ยังต้องพัฒนา

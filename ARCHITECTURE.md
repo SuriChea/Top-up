@@ -1,4 +1,4 @@
-# Architecture
+# สถาปัตยกรรมระบบ
 
 ```mermaid
 flowchart LR
@@ -20,7 +20,7 @@ flowchart LR
   API1 --> Mailpit[SMTP / Mailpit]
 ```
 
-## Checkout and fulfillment
+## Checkout และการเติมสินค้า
 
 ```mermaid
 sequenceDiagram
@@ -51,23 +51,23 @@ sequenceDiagram
   A->>R: subscribe to events from either replica
 ```
 
-The worker checks the mock game's persisted status before every POST. This recovers the ambiguous timeout case where a game top-up succeeded but its HTTP response was lost. PostgreSQL owns order and job state; Redis only distributes already-persisted events and rate-limit counters.
+Worker ตรวจสอบสถานะที่บันทึกไว้ของ mock game ก่อนส่ง POST ทุกครั้ง วิธีนี้ช่วยกู้คืนกรณีหมดเวลาแบบคลุมเครือ ซึ่งการเติมเกมสำเร็จแล้วแต่ response HTTP สูญหาย PostgreSQL เป็นแหล่งข้อมูลหลักของคำสั่งซื้อและสถานะงาน ส่วน Redis ใช้กระจายเฉพาะเหตุการณ์ที่บันทึกลงฐานข้อมูลแล้วและเก็บตัวนับจำกัดอัตราคำขอ
 
-## Authentication and administration
+## การยืนยันตัวตนและการจัดการระบบ
 
-The API emails one-time six-digit codes through the configured SMTP relay. OTP challenges are short-lived, attempt-limited, and stored as HMAC digests. Successful verification issues a random opaque session token; only its SHA-256 digest is persisted, and each request loads the current role from PostgreSQL. The `ADMIN_EMAILS` allowlist controls admin assignment and revocation. Cookie-authenticated writes require the configured same-origin allowlist, and admin mutations create audit records.
+API ส่งรหัสตัวเลขหกหลักที่ใช้ครั้งเดียวผ่าน SMTP relay ที่กำหนด OTP challenge มีอายุสั้น จำกัดจำนวนครั้ง และจัดเก็บเป็น HMAC digest เมื่อยืนยันสำเร็จ ระบบจะออก session token แบบ opaque ที่สุ่มขึ้น โดยบันทึกเฉพาะ SHA-256 digest ลงฐานข้อมูล และโหลด role ปัจจุบันจาก PostgreSQL ทุกคำขอ allowlist `ADMIN_EMAILS` เป็นตัวกำหนดการให้และเพิกถอนสิทธิ์ผู้ดูแล การเขียนข้อมูลที่ยืนยันตัวตนด้วย cookie ต้องมาจาก same-origin ที่อนุญาต และการเปลี่ยนแปลงโดยผู้ดูแลจะสร้าง audit record
 
-## Settlement reconciliation
+## การกระทบยอด
 
-Administrators upload bounded CSV settlement files. Each provider event is compared with the persisted signed-webhook event and order snapshot; internal successful/refund events absent from the file are also reported. Batch rows and results are stored in PostgreSQL for review rather than silently changing order/payment state.
+ผู้ดูแลระบบอัปโหลดไฟล์ CSV settlement ที่จำกัดขนาดไว้ ระบบเปรียบเทียบแต่ละเหตุการณ์ของผู้ให้บริการกับเหตุการณ์ signed-webhook และ snapshot ของคำสั่งซื้อที่บันทึกไว้ พร้อมรายงานเหตุการณ์ชำระเงินสำเร็จ/คืนเงินภายในที่ไม่อยู่ในไฟล์ ผลลัพธ์ของแต่ละ batch ถูกบันทึกใน PostgreSQL เพื่อให้ตรวจสอบได้ โดยไม่เปลี่ยนสถานะคำสั่งซื้อ/การชำระเงินอย่างเงียบ ๆ
 
-## Failure handling
+## การจัดการเมื่อเกิดข้อผิดพลาด
 
-- **API replica exits:** Nginx continues routing to the healthy replica; the order and idempotency records are shared in PostgreSQL.
-- **Redis unavailable:** `/readyz` fails closed; order reads/writes may still work, but event fan-out and tracking rate limiting cannot be guaranteed until Redis recovers.
-- **Payment webhook duplicate:** `payment_webhook_events.event_id` is unique; repeated delivery returns success without repeating the transition.
-- **Wrong payment amount:** the order enters `NEEDS_REVIEW`; no fulfillment job is created.
-- **Payment arrives after expiry:** the API attempts to reserve stock again; if unavailable it schedules an automatic refund.
-- **Game timeout:** the worker retries with exponential backoff and jitter, and checks game status before another delivery attempt.
-- **Worker exits while holding a job:** jobs locked for over two minutes are made retryable.
-- **Persistent fulfillment failure:** the job is marked dead and an automatic refund is queued; on-call should also review the order and provider state.
+- **API replica หยุดทำงาน:** Nginx ยังคงส่งคำขอไปยัง replica ที่พร้อมใช้งาน และข้อมูลคำสั่งซื้อกับ idempotency ถูกใช้ร่วมกันผ่าน PostgreSQL
+- **Redis ใช้งานไม่ได้:** `/readyz` จะไม่รายงานว่าพร้อมใช้งาน การอ่าน/เขียนคำสั่งซื้ออาจยังทำได้ แต่ไม่สามารถรับประกันการกระจาย event และการจำกัดอัตราคำขอสำหรับ tracking จนกว่า Redis จะกลับมา
+- **Payment webhook ซ้ำ:** `payment_webhook_events.event_id` มี unique constraint การส่งซ้ำจะได้รับ success โดยไม่ทำ transition ซ้ำ
+- **ยอดชำระไม่ถูกต้อง:** คำสั่งซื้อจะเปลี่ยนเป็น `NEEDS_REVIEW` และไม่มีการสร้าง fulfillment job
+- **ได้รับการชำระเงินหลังคำสั่งซื้อหมดอายุ:** API พยายามจองสต็อกอีกครั้ง หากไม่มีสต็อกจะจัดคิวคืนเงินอัตโนมัติ
+- **Game timeout:** worker ลองใหม่ด้วย exponential backoff และ jitter พร้อมตรวจสถานะเกมก่อนส่งงานอีกครั้ง
+- **Worker หยุดทำงานขณะถือครองงาน:** งานที่ถูกล็อกเกินสองนาทีจะถูกเปลี่ยนให้ลองใหม่ได้
+- **การเติมสินค้าล้มเหลวต่อเนื่อง:** งานจะถูกทำเครื่องหมายเป็น dead และเข้าคิวคืนเงินอัตโนมัติ ผู้ดูแลเวรควรตรวจสอบคำสั่งซื้อและสถานะจากผู้ให้บริการด้วย

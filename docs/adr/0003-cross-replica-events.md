@@ -1,6 +1,6 @@
-# ADR 0003: Redis pub/sub for cross-replica live events
+# ADR 0003: ใช้ Redis pub/sub สำหรับ event สดข้าม replica
 
-- Status: Accepted
-- Decision: Commit order events to PostgreSQL first, then publish their IDs and payloads to a Redis channel keyed by order ID. SSE subscribes before replaying database events and deduplicates by event ID.
-- Rationale: Either API replica can serve tracking while another handles the webhook or worker event. The database is the replay source after reconnect.
-- Consequences: Pub/sub is transient; clients reconnect with `Last-Event-ID` and replay from the append-only event table. Redis availability is required for ready status and live delivery.
+- สถานะ: ยอมรับแล้ว
+- การตัดสินใจ: บันทึก order event ลง PostgreSQL ก่อน จากนั้นเผยแพร่ ID และ payload ไปยัง Redis channel ที่กำหนดตาม order ID โดย SSE จะ subscribe ก่อน replay event จากฐานข้อมูล และตัด event ซ้ำด้วย event ID
+- เหตุผล: API replica ตัวใดก็ให้บริการ tracking ได้ แม้ webhook หรือ worker event จะถูกจัดการโดยอีกตัว ฐานข้อมูลเป็นแหล่งข้อมูลสำหรับ replay หลังเชื่อมต่อใหม่
+- ผลที่ตามมา: pub/sub เป็นข้อมูลชั่วคราว client จะเชื่อมต่อใหม่ด้วย `Last-Event-ID` และ replay จากตาราง event แบบ append-only ต้องมี Redis พร้อมใช้งานจึงจะรายงานสถานะ ready และส่ง event สดได้

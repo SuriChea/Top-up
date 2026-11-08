@@ -1,7 +1,7 @@
-# ADR 0001: Reserve stock in the order transaction
+# ADR 0001: จองสต็อกภายใน transaction ของคำสั่งซื้อ
 
-- Status: Accepted
-- Decision: Lock the product row with `SELECT ... FOR UPDATE`, validate available quantity, decrement finite stock, and insert the pending order in one PostgreSQL transaction.
-- Rationale: Competing purchases serialize on the same product row. A failed insert rolls the reservation back, so limited stock is not oversold.
-- Consequences: Unpaid orders temporarily reserve stock. The worker expires pending orders and restores their stock. Database row locking, not the UI, is the concurrency boundary.
-- Limitation: Per-customer flash-sale limits across multiple active orders are not implemented yet.
+- สถานะ: ยอมรับแล้ว
+- การตัดสินใจ: ล็อกแถวสินค้าโดยใช้ `SELECT ... FOR UPDATE`, ตรวจสอบจำนวนที่พร้อมขาย, หักสต็อกที่มีจำนวนจำกัด และเพิ่มคำสั่งซื้อที่รอชำระภายใน PostgreSQL transaction เดียวกัน
+- เหตุผล: การซื้อที่เกิดขึ้นพร้อมกันจะถูกจัดลำดับผ่านแถวสินค้ารายการเดียว หากเพิ่มคำสั่งซื้อไม่สำเร็จ การจองสต็อกจะถูก rollback จึงไม่ขายสินค้าเกินจำนวนที่มี
+- ผลที่ตามมา: คำสั่งซื้อที่ยังไม่ชำระจะจองสต็อกไว้ชั่วคราว worker จะทำให้คำสั่งซื้อที่รอชำระหมดอายุและคืนสต็อก ขอบเขตการควบคุม concurrency อยู่ที่การล็อกแถวฐานข้อมูล ไม่ใช่ UI
+- ข้อจำกัด: ยังไม่ได้ทำขีดจำกัดการซื้อ flash sale ต่อหนึ่งลูกค้าครอบคลุมหลายคำสั่งซื้อที่ยัง active

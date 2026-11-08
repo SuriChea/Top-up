@@ -1,0 +1,307 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  sku            String  @id
+  name           String
+  priceSatang    BigInt  @map("price_satang")
+  stock           Int
+  maxPerOrder     Int     @default(10) @map("max_per_order")
+  maxPerEmail     Int?    @map("max_per_email")
+  maxOrderCount   Int?    @map("max_order_count")
+  active          Boolean @default(true)
+  orders          Order[]
+  orderItems      OrderItem[]
+
+  @@map("products")
+}
+
+model DiscountCode {
+  code               String  @id
+  discountType       String  @map("discount_type")
+  discountValue      BigInt  @map("discount_value")
+  maxDiscountSatang  BigInt? @map("max_discount_satang")
+  minOrderSatang     BigInt  @default(0) @map("min_order_satang")
+  maxUses            Int?    @map("max_uses")
+  usesCount          Int     @default(0) @map("uses_count")
+  active             Boolean @default(true)
+
+  @@map("discount_codes")
+}
+
+model Order {
+  id                 String         @id
+  email              String
+  playerId           String         @map("player_id")
+  sku                String
+  productName        String         @map("product_name")
+  unitPriceSatang    BigInt         @map("unit_price_satang")
+  quantity           Int
+  subtotalSatang     BigInt         @map("subtotal_satang")
+  discountSatang     BigInt         @map("discount_satang")
+  feeSatang          BigInt         @map("fee_satang")
+  vatSatang          BigInt         @map("vat_satang")
+  totalSatang        BigInt         @map("total_satang")
+  refundedSatang     BigInt         @default(0) @map("refunded_satang")
+  discountCode       String?        @map("discount_code")
+  paymentMethod      String         @map("payment_method")
+  status             String
+  paymentReference   String?        @map("payment_reference")
+  gameReference      String?        @map("game_reference")
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt          DateTime       @map("expires_at") @db.Timestamptz
+  updatedAt          DateTime       @default(now()) @map("updated_at") @db.Timestamptz
+  product            Product        @relation(fields: [sku], references: [sku])
+  events             OrderEvent[]
+  fulfillmentJob     FulfillmentJob?
+  refundJobs         RefundJob[]
+  refundRequest      RefundRequest?
+  orderItems         OrderItem[]
+  mockPaymentRefunds MockPaymentRefund[]
+
+  @@index([createdAt(sort: Desc), id(sort: Desc)], map: "orders_created_id_idx")
+  @@index([status, createdAt(sort: Desc)], map: "orders_status_created_idx")
+  @@index([email, createdAt(sort: Desc)], map: "orders_email_created_idx")
+  @@index([sku, email], map: "orders_sku_email_active_idx")
+  @@map("orders")
+}
+
+model OrderItem {
+  id              BigInt   @id @default(autoincrement())
+  orderId         String   @map("order_id")
+  sku             String
+  productName     String   @map("product_name")
+  playerId        String   @map("player_id")
+  unitPriceSatang BigInt   @map("unit_price_satang")
+  quantity        Int
+  gameReference   String   @unique @map("game_reference")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product         Product  @relation(fields: [sku], references: [sku])
+
+  @@unique([orderId, sku])
+  @@index([orderId, id], map: "order_items_order_id_idx")
+  @@map("order_items")
+}
+
+model OrderEvent {
+  id        BigInt   @id @default(autoincrement())
+  orderId   String   @map("order_id")
+  status    String
+  actor     String
+  reason    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  order     Order    @relation(fields: [orderId], references: [id])
+
+  @@index([orderId, id], map: "order_events_order_id_idx")
+  @@map("order_events")
+}
+
+model IdempotencyKey {
+  key          String    @id
+  requestHash  String    @map("request_hash")
+  statusCode   Int?      @map("status_code")
+  responseBody Json?     @map("response_body")
+  responseBodyText String? @map("response_body_text")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt    DateTime? @map("expires_at") @db.Timestamptz
+
+  @@map("idempotency_keys")
+}
+
+model PaymentWebhookEvent {
+  eventId    String   @id @map("event_id")
+  orderId    String   @map("order_id")
+  eventType  String   @map("event_type")
+  payload    Json
+  receivedAt DateTime @default(now()) @map("received_at") @db.Timestamptz
+
+  @@map("payment_webhook_events")
+}
+
+model FulfillmentJob {
+  id        BigInt    @id @default(autoincrement())
+  orderId   String    @unique @map("order_id")
+  status    String    @default("queued")
+  attempts  Int       @default(0)
+  runAfter  DateTime  @default(now()) @map("run_after") @db.Timestamptz
+  lockedAt  DateTime? @map("locked_at") @db.Timestamptz
+  lastError String?   @map("last_error")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  order     Order     @relation(fields: [orderId], references: [id])
+
+  @@index([runAfter, id], map: "fulfillment_jobs_ready_idx")
+  @@map("fulfillment_jobs")
+}
+
+model RefundJob {
+  id           BigInt    @id @default(autoincrement())
+  orderId      String    @map("order_id")
+  amountSatang BigInt    @map("amount_satang")
+  status       String    @default("queued")
+  attempts     Int       @default(0)
+  runAfter     DateTime  @default(now()) @map("run_after") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  requestedBy  String?   @map("requested_by")
+  reason       String?
+  actorUserId  String?   @map("actor_user_id")
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz
+  lastError    String?   @map("last_error")
+  order        Order     @relation(fields: [orderId], references: [id])
+  idempotencies RefundIdempotency[]
+
+  @@index([orderId, id], map: "refund_jobs_order_created_idx")
+  @@map("refund_jobs")
+}
+
+model MockGameTopup {
+  id        BigInt   @id @default(autoincrement())
+  reference String
+  gameUid   String   @map("game_uid")
+  sku       String
+  qty       Int
+  status    String   @default("succeeded")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("mock_game_topups")
+}
+
+model AuthUser {
+  id             String            @id
+  email          String            @unique
+  role           String            @default("customer")
+  roleSource     String            @default("manual") @map("role_source")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime          @default(now()) @map("updated_at") @db.Timestamptz
+  sessions       AuthSession[]
+  auditLogs      AdminAuditLog[]
+  refundRequests RefundRequest[]
+  reconciliation ReconciliationBatch[]
+
+  @@map("auth_users")
+}
+
+model OtpChallenge {
+  id         String    @id
+  email      String
+  codeHash   String    @map("code_hash")
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz
+  attempts   Int       @default(0)
+  lockedUntil DateTime? @map("locked_until") @db.Timestamptz
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([email, createdAt(sort: Desc)], map: "otp_challenges_email_created_idx")
+  @@map("otp_challenges")
+}
+
+model OtpEmailLock {
+  email          String   @id
+  failedAttempts Int      @default(0) @map("failed_attempts")
+  lockedUntil    DateTime? @map("locked_until") @db.Timestamptz
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("otp_email_locks")
+}
+
+model RefundIdempotency {
+  idempotencyKey String    @id @map("idempotency_key")
+  requestHash    String    @map("request_hash")
+  refundJobId    BigInt    @map("refund_job_id")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  refundJob      RefundJob @relation(fields: [refundJobId], references: [id])
+
+  @@map("refund_idempotency")
+}
+
+model MockPaymentRefund {
+  refundId    String   @id @map("refund_id")
+  orderId     String   @map("order_id")
+  amountSatang BigInt  @map("amount_satang")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  order       Order    @relation(fields: [orderId], references: [id])
+
+  @@map("mock_payment_refunds")
+}
+
+model AuthSession {
+  tokenHash String    @id @map("token_hash")
+  userId    String    @map("user_id")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  user      AuthUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt(sort: Desc)], map: "auth_sessions_user_expiry_idx")
+  @@map("auth_sessions")
+}
+
+model AdminAuditLog {
+  id         BigInt   @id @default(autoincrement())
+  actorUserId String  @map("actor_user_id")
+  action     String
+  resourceType String @map("resource_type")
+  resourceId String   @map("resource_id")
+  details    Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  actor      AuthUser @relation(fields: [actorUserId], references: [id])
+
+  @@index([createdAt(sort: Desc), id(sort: Desc)], map: "admin_audit_logs_created_idx")
+  @@map("admin_audit_logs")
+}
+
+model RefundRequest {
+  id          BigInt   @id @default(autoincrement())
+  orderId     String   @unique @map("order_id")
+  requestedBy String   @map("requested_by")
+  reason      String
+  status      String   @default("pending")
+  adminNote   String?  @map("admin_note")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz
+  order       Order    @relation(fields: [orderId], references: [id])
+  user        AuthUser @relation(fields: [requestedBy], references: [id])
+
+  @@index([status, createdAt(sort: Desc)], map: "refund_requests_status_created_idx")
+  @@map("refund_requests")
+}
+
+model ReconciliationBatch {
+  id          String                @id
+  uploadedBy  String                @map("uploaded_by")
+  fileName    String                @map("file_name")
+  rowCount    Int                   @default(0) @map("row_count")
+  matchedCount Int                  @default(0) @map("matched_count")
+  mismatchCount Int                 @default(0) @map("mismatch_count")
+  status      String                @default("completed")
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  uploader    AuthUser              @relation(fields: [uploadedBy], references: [id])
+  items       ReconciliationItem[]
+
+  @@index([createdAt(sort: Desc), id(sort: Desc)], map: "reconciliation_batches_created_idx")
+  @@map("reconciliation_batches")
+}
+
+model ReconciliationItem {
+  id               BigInt                @id @default(autoincrement())
+  batchId          String                @map("batch_id")
+  providerEventId  String                @map("provider_event_id")
+  orderId          String                @map("order_id")
+  amountSatang     BigInt                @map("amount_satang")
+  currency         String
+  eventType        String                @map("event_type")
+  status           String
+  detail           String
+  internalEventId String?                @map("internal_event_id")
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  batch            ReconciliationBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, id], map: "reconciliation_items_batch_idx")
+  @@map("reconciliation_items")
+}

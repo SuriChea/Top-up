@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS products (
   price_satang BIGINT NOT NULL CHECK (price_satang >= 0),
   stock INTEGER NOT NULL CHECK (stock >= -1),
   max_per_order INTEGER NOT NULL DEFAULT 10 CHECK (max_per_order > 0),
+  max_per_email INTEGER CHECK (max_per_email > 0),
+  max_order_count INTEGER CHECK (max_order_count > 0),
   active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
@@ -109,13 +111,15 @@ CREATE TABLE IF NOT EXISTS mock_game_topups (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO products (sku, name, price_satang, stock, max_per_order)
+INSERT INTO products (sku, name, price_satang, stock, max_per_order, max_per_email, max_order_count)
 VALUES
-  ('DIAMOND-1000', '1,000 Diamonds', 34900, -1, 10),
-  ('DIAMOND-5000', '5,000 Diamonds', 159000, -1, 10),
-  ('MONTHLY-PASS', 'Monthly Pass', 17900, -1, 1),
-  ('FLASH-SKIN-01', 'Limited Skin (Flash Sale)', 9900, 100, 2)
-ON CONFLICT (sku) DO NOTHING;
+  ('DIAMOND-1000', '1,000 Diamonds', 34900, -1, 10, NULL, NULL),
+  ('DIAMOND-5000', '5,000 Diamonds', 159000, -1, 10, NULL, NULL),
+  ('MONTHLY-PASS', 'Monthly Pass', 17900, -1, 1, 1, NULL),
+  ('FLASH-SKIN-01', 'Limited Skin (Flash Sale)', 9900, 100, 2, 2, 100)
+ON CONFLICT (sku) DO UPDATE SET
+  max_per_email = EXCLUDED.max_per_email,
+  max_order_count = EXCLUDED.max_order_count;
 
 INSERT INTO discount_codes
   (code, discount_type, discount_value, max_discount_satang, min_order_satang, max_uses)

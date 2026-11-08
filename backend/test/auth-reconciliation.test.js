@@ -47,6 +47,19 @@ test("parses quoted CSV columns and compares settlement details", () => {
   });
 });
 
+test("accepts settlement exports with settled_at instead of currency", () => {
+  const [record] = parseCsv(
+    "event_id,order_id,amount_satang,type,settled_at\n" +
+    "evt-2,ORD-2,1200,payment.succeeded,2026-03-01T10:00:00Z\n"
+  );
+  assert.equal(record.currency, "THB");
+  assert.equal(record.settledAt, "2026-03-01T10:00:00Z");
+  assert.throws(() => parseCsv(
+    "event_id,order_id,amount_satang,type,settled_at\n" +
+    "evt-3,ORD-3,1200,payment.succeeded,not-a-date\n"
+  ), /invalid settled_at timestamp/);
+});
+
 test("rejects malformed, oversized, and incomplete settlement CSV rows", () => {
   assert.throws(() => parseCsv("event_id,order_id\n1,2"), /must include unique columns/);
   assert.throws(() => parseCsv(

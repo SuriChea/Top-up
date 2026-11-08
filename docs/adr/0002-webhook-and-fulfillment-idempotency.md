@@ -1,7 +1,7 @@
-# ADR 0002: Deduplicate webhooks and recover fulfillment ambiguity
+# ADR 0002: ป้องกัน webhook ซ้ำและกู้คืนกรณี fulfillment มีผลลัพธ์คลุมเครือ
 
-- Status: Accepted
-- Decision: Persist provider `event_id` under a unique constraint, and use the immutable order ID as the game top-up reference. Before retrying a game POST, the worker queries the provider's top-up status by that reference.
-- Rationale: Event retries cannot reapply payment state, while a game operation that succeeded before a timeout can be observed before any retry POST.
-- Consequences: A provider status lookup must be available to resolve ambiguous outcomes. Redis is not used as the durable idempotency store.
-- Limitation: The local mock stores game top-ups in PostgreSQL. Real-provider retention and status consistency need contract testing.
+- สถานะ: ยอมรับแล้ว
+- การตัดสินใจ: บันทึก `event_id` จากผู้ให้บริการภายใต้ unique constraint และใช้ ID คำสั่งซื้อที่ไม่เปลี่ยนแปลงเป็น reference สำหรับเติมเกม ก่อนลองส่ง POST ไปยังเกมอีกครั้ง worker จะ query สถานะการเติมจากผู้ให้บริการด้วย reference นั้น
+- เหตุผล: การลองส่ง event ซ้ำจะไม่ทำให้สถานะการชำระเงินถูกใช้ซ้ำ ขณะที่ตรวจพบได้ว่าการเติมเกมสำเร็จก่อน timeout หรือไม่ ก่อนจะลองส่ง POST อีกครั้ง
+- ผลที่ตามมา: ต้องมีการค้นหาสถานะจากผู้ให้บริการเพื่อคลี่คลายผลลัพธ์ที่กำกวม ไม่ใช้ Redis เป็นที่เก็บ idempotency แบบถาวร
+- ข้อจำกัด: mock ในเครื่องเก็บข้อมูลการเติมเกมใน PostgreSQL ส่วน retention และความสอดคล้องของสถานะในผู้ให้บริการจริงต้องทดสอบตาม contract

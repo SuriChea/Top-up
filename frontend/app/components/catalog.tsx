@@ -7,6 +7,8 @@ type Product = {
   price_satang: number;
   stock: number;
   max_per_order: number;
+  max_per_email: number | null;
+  max_order_count: number | null;
 };
 
 type Locale = "en" | "th";
@@ -127,9 +129,16 @@ export async function Catalog({ locale }: { locale: Locale }) {
                     {product.stock === -1 ? text.available : text.remaining(product.stock)}
                   </span>
                 </div>
+                {(product.max_per_email || product.max_order_count) && (
+                  <p className="purchase-limit">
+                    {locale === "th"
+                      ? `${product.max_per_email ? `จำกัด ${product.max_per_email} ชิ้นต่ออีเมล` : ""}${product.max_order_count ? ` · ทั้งระบบ ${product.max_order_count} ออเดอร์` : ""}`
+                      : `${product.max_per_email ? `Limit ${product.max_per_email} per email` : ""}${product.max_order_count ? ` · ${product.max_order_count} orders system-wide` : ""}`}
+                  </p>
+                )}
                 <Link
                   className="button button-card"
-                  href={`/checkout?sku=${encodeURIComponent(product.sku)}`}
+                  href={`/${locale}/checkout?sku=${encodeURIComponent(product.sku)}`}
                   aria-label={`${text.button}: ${product.name}`}
                 >
                   {text.button}<span aria-hidden="true">↗</span>

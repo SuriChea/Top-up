@@ -6,6 +6,10 @@
     "start": "node migrate.js && node server.js",
     "start:worker": "node worker.js",
     "migrate": "node migrate.js",
+    "db:studio": "prisma studio --schema prisma/schema.prisma",
+    "db:studio:docker": "prisma studio --schema prisma/schema.prisma --hostname 0.0.0.0 --port 5555",
+    "seed:orders": "node scripts/seed-orders.js",
+    "benchmark:admin-orders": "node scripts/benchmark-admin-orders.js",
     "test": "node --test"
   },
   "dependencies": {
@@ -14,5 +18,9 @@
     "ioredis": "^5.4.2",
     "nodemailer": "^10.3.1",
     "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@prisma/client": "^6.19.0",
+    "prisma": "^6.19.0"
   }
 }

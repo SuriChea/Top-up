@@ -1,13 +1,13 @@
-# AI usage log
+# บันทึกการใช้ AI
 
-AI assistance was used to inspect the supplied requirements, draft the API/domain implementation, create the storefront and simulator UI, and draft the operational documentation. The implementer should review and run the code before relying on it.
+มีการใช้ AI ช่วยตรวจสอบข้อกำหนดที่ได้รับ ร่าง API และส่วนการทำงานของโดเมน สร้างหน้าร้านและ UI สำหรับตัวจำลอง รวมถึงร่างเอกสารการปฏิบัติการ ผู้พัฒนาควรตรวจสอบและรันโค้ดก่อนนำไปใช้งาน
 
-## Issues caught during review and corrected
+## ประเด็นที่พบและแก้ไขระหว่างการตรวจสอบ
 
-1. The first SSE implementation subscribed to Redis after querying event history, leaving a gap where an event could be lost. The listener now subscribes first, buffers live events while replaying the database, and deduplicates by the event ID.
-2. The first tracking-link approach placed the bearer token in the URL, where it could be retained in access logs and browser history. The UI now sends the token in an Authorization header.
-3. A failed fulfillment retry initially changed the order back to the queue without recording that transition. The worker now appends and publishes an order event when it schedules a retry.
+1. การทำ SSE รุ่นแรกสมัครรับ Redis หลังจากสอบถามประวัติเหตุการณ์แล้ว ทำให้เกิดช่องว่างที่ event อาจสูญหาย ตอนนี้ listener จะ subscribe ก่อน จากนั้น buffer live event ระหว่าง replay ข้อมูลจากฐานข้อมูล และตัด event ซ้ำด้วย event ID
+2. วิธีสร้าง tracking link รุ่นแรกใส่ bearer token ไว้ใน URL ซึ่งอาจถูกเก็บใน access log และประวัติเบราว์เซอร์ ตอนนี้ UI ส่ง token ผ่าน Authorization header
+3. การลอง fulfillment ซ้ำที่ล้มเหลวเดิมเปลี่ยนคำสั่งซื้อกลับเข้าคิวโดยไม่บันทึก transition ตอนนี้ worker เพิ่มและเผยแพร่ order event เมื่อจัดคิว retry
 
-## Scope note
+## ข้อจำกัดของขอบเขต
 
-This log records AI-assisted code generation and review. It is not evidence that the full exam requirements or security properties have passed independent verification. Known incomplete requirements are listed in `README.md`.
+บันทึกนี้ระบุการสร้างและตรวจทานโค้ดโดย AI ไม่ใช่หลักฐานว่าข้อกำหนดการสอบทั้งหมดหรือคุณสมบัติด้านความปลอดภัยผ่านการตรวจสอบโดยอิสระแล้ว ข้อกำหนดที่ยังไม่สมบูรณ์ระบุไว้ใน `README.md`

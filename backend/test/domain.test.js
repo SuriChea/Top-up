@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { calculateTotals, newOrderId, validOrderId } = require("../domain");
+const { calculateTotals, canTransitionOrder, newOrderId, validOrderId } = require("../domain");
 
 test("matches the card pricing example to the satang", () => {
   const result = calculateTotals(
@@ -70,4 +70,28 @@ test("creates non-sequential order IDs with valid checksums", () => {
   }
   assert.equal(validOrderId("ORD-2587965432159-229"), true);
   assert.equal(validOrderId("ORD-2587965432159-458"), false);
+});
+
+test("allows only documented order state transitions", () => {
+  const allowed = [
+    ["PENDING_PAYMENT", "PAID"],
+    ["PENDING_PAYMENT", "EXPIRED"],
+    ["PAID", "IN_QUEUE"],
+    ["IN_PROGRESS", "IN_QUEUE"],
+    ["IN_PROGRESS", "COMPLETED"],
+    ["FAILED", "IN_QUEUE"],
+    ["EXPIRED", "PAID"],
+    ["NEEDS_REVIEW", "REFUNDED"],
+    ["REFUNDED", "NEEDS_REVIEW"]
+  ];
+  for (const [from, to] of allowed) assert.equal(canTransitionOrder(from, to), true, `${from} -> ${to}`);
+  const rejected = [
+    ["PENDING_PAYMENT", "COMPLETED"],
+    ["PAYMENT_FAILED", "IN_PROGRESS"],
+    ["COMPLETED", "PENDING_PAYMENT"],
+    ["REFUNDED", "IN_QUEUE"],
+    ["MISSING", "PAID"]
+  ];
+  for (const [from, to] of rejected) assert.equal(canTransitionOrder(from, to), false, `${from} -> ${to}`);
+  assert.equal(canTransitionOrder("PAID", "PAID"), true);
 });

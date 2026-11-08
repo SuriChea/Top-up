@@ -59,18 +59,21 @@ export async function readOrderEvents(
   }
 }
 
-export function customerStatus(status: string) {
-  const mapping: Record<string, { label: string; tone: string }> = {
-    PENDING_PAYMENT: { label: "รอชำระเงิน", tone: "waiting" },
-    PAID: { label: "ชำระเงินแล้ว", tone: "progress" },
-    IN_QUEUE: { label: "อยู่ในคิว", tone: "progress" },
-    IN_PROGRESS: { label: "กำลังเติมเกม", tone: "progress" },
-    COMPLETED: { label: "เติมสำเร็จ", tone: "success" },
-    EXPIRED: { label: "หมดเวลาชำระ", tone: "muted" },
-    PAYMENT_FAILED: { label: "ชำระไม่สำเร็จ", tone: "danger" },
-    FAILED: { label: "ต้องติดต่อทีมงาน", tone: "danger" },
-    REFUNDED: { label: "คืนเงินแล้ว", tone: "muted" },
-    NEEDS_REVIEW: { label: "กำลังตรวจสอบ", tone: "warning" }
+export function customerStatus(status: string, locale: "en" | "th" = "th") {
+  const mapping: Record<string, { en: string; th: string; tone: string }> = {
+    PENDING_PAYMENT: { en: "Awaiting payment", th: "รอชำระเงิน", tone: "waiting" },
+    PAID: { en: "Payment received", th: "ชำระเงินแล้ว", tone: "progress" },
+    IN_QUEUE: { en: "Queued", th: "อยู่ในคิว", tone: "progress" },
+    IN_PROGRESS: { en: "Processing", th: "กำลังเติมเกม", tone: "progress" },
+    COMPLETED: { en: "Completed", th: "เติมสำเร็จ", tone: "success" },
+    EXPIRED: { en: "Payment expired", th: "หมดเวลาชำระ", tone: "muted" },
+    PAYMENT_FAILED: { en: "Payment failed", th: "ชำระไม่สำเร็จ", tone: "danger" },
+    FAILED: { en: "Contact support", th: "ต้องติดต่อทีมงาน", tone: "danger" },
+    REFUNDED: { en: "Refunded", th: "คืนเงินแล้ว", tone: "muted" },
+    NEEDS_REVIEW: { en: "Under review", th: "กำลังตรวจสอบ", tone: "warning" }
   };
-  return mapping[status] || { label: status, tone: "muted" };
+  const entry = mapping[status];
+  return entry
+    ? { label: entry[locale], tone: entry.tone }
+    : { label: status, tone: "muted" };
 }

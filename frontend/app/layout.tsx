@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import SiteHeader from "./components/site-header";
+import SiteFooter from "./components/site-footer";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,10 +18,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body>
         <SiteHeader />
         {children}
-        <footer className="site-footer">
-          <span>© 2026 InBlack Top-Up</span>
-          <span>เติมเกมง่าย ปลอดภัย ได้ไว</span>
-        </footer>
+        <SiteFooter />
       </body>
     </html>
   );

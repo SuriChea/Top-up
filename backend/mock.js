@@ -78,18 +78,57 @@ if (kind === "pay") {
   app.post("/refund", async (req, res, next) => {
     try {
       const { orderId, amountSatang } = req.body;
-      if (!orderId || !Number.isSafeInteger(amountSatang) || amountSatang < 0) {
+      const refundId = typeof req.body.refundId === "string" ? req.body.refundId : `full-${orderId}`;
+      if (!orderId || !Number.isSafeInteger(amountSatang) || amountSatang <= 0 ||
+          !refundId || refundId.length > 200) {
         return res.status(400).json({ error: "Invalid refund request" });
       }
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const order = await client.query(
+          "SELECT total_satang FROM orders WHERE id = $1 FOR UPDATE",
+          [orderId]
+        );
+        if (!order.rows[0]) throw new Error("Refund order was not found");
+        const saved = await client.query(
+          "SELECT order_id, amount_satang FROM mock_payment_refunds WHERE refund_id = $1 FOR UPDATE",
+          [refundId]
+        );
+        if (saved.rows[0]) {
+          if (saved.rows[0].order_id !== orderId || Number(saved.rows[0].amount_satang) !== amountSatang) {
+            throw new Error("Refund ID was reused with a different request");
+          }
+        } else {
+          const refunded = await client.query(
+            "SELECT COALESCE(SUM(amount_satang), 0)::bigint AS amount FROM mock_payment_refunds WHERE order_id = $1",
+            [orderId]
+          );
+          if (BigInt(refunded.rows[0].amount) + BigInt(amountSatang) > BigInt(order.rows[0].total_satang)) {
+            throw new Error("Refund exceeds the amount paid");
+          }
+          await client.query(
+            `INSERT INTO mock_payment_refunds (refund_id, order_id, amount_satang)
+             VALUES ($1, $2, $3)`,
+            [refundId, orderId, amountSatang]
+          );
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
       await deliverWebhook({
-        event_id: `refund_${orderId}`,
+        event_id: `refund_${refundId}`,
         type: "payment.refunded",
         order_id: orderId,
         amount_satang: amountSatang,
         currency: "THB",
         occurred_at: new Date().toISOString()
       });
-      return res.json({ status: "refunded", orderId, amountSatang });
+      return res.json({ status: "refunded", refundId, orderId, amountSatang });
     } catch (error) {
       return next(error);
     }

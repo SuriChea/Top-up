@@ -1,39 +1,39 @@
-# Runbook
+# คู่มือปฏิบัติการ
 
-## Start the stack
+## เริ่มระบบ
 
-Run `docker compose up --build` from the workspace root. Check `docker compose ps`, API readiness at <http://localhost:8080/readyz>, and the customer site at <http://localhost:3000>.
+รัน `docker compose up --build` จากโฟลเดอร์หลักของโปรเจกต์ ตรวจสอบสถานะด้วย `docker compose ps` ตรวจความพร้อมของ API ที่ <http://localhost:8080/readyz> และเปิดเว็บไซต์สำหรับลูกค้าที่ <http://localhost:3000>
 
-## API readiness fails
+## API ไม่พร้อมใช้งาน
 
-1. Inspect `docker compose logs postgres redis api-1 api-2`.
-2. Wait for Postgres and Redis health checks; do not remove the data volumes to fix a transient outage.
-3. If only one API replica is unhealthy, Nginx will continue serving through the other. Restore/rebuild the failed replica and confirm both `/readyz` endpoints.
+1. ตรวจสอบล็อกด้วย `docker compose logs postgres redis api-1 api-2`
+2. รอให้การตรวจสุขภาพของ Postgres และ Redis ผ่าน อย่าลบ volume ที่เก็บข้อมูลเพื่อแก้ปัญหาที่เกิดขึ้นชั่วคราว
+3. หาก API replica ไม่พร้อมใช้งานเพียงตัวเดียว Nginx จะยังให้บริการผ่านอีกตัวได้ ให้กู้คืนหรือ build replica ที่มีปัญหาใหม่ แล้วตรวจสอบว่า endpoint `/readyz` ของทั้งสองตัวทำงาน
 
-## Fulfillment retries or dead-letter jobs
+## งานเติมสินค้าลองซ้ำหรืออยู่ในคิว dead-letter
 
-1. Query `fulfillment_jobs` joined to `orders` for `retry`/`dead` rows and inspect `last_error`, `attempts`, and the order event timeline.
-2. Query the mock provider with `GET http://localhost:4002/topups/{order-id}` and inspect `GET http://localhost:4002/stats` before considering another delivery attempt.
-3. Never issue a manual top-up until the provider confirms no successful top-up exists for the order reference.
-4. A dead job creates an automatic refund job. Check `refund_jobs` and the order's final status; contact finance if the provider cannot confirm the refund.
+1. ค้นหารายการสถานะ `retry` หรือ `dead` จาก `fulfillment_jobs` ที่เชื่อมกับ `orders` แล้วตรวจสอบ `last_error`, `attempts` และลำดับเหตุการณ์ของคำสั่งซื้อ
+2. ตรวจสอบผู้ให้บริการจำลองด้วย `GET http://localhost:4002/topups/{order-id}` และดู `GET http://localhost:4002/stats` ก่อนพิจารณาส่งรายการอีกครั้ง
+3. ห้ามเติมสินค้าด้วยตนเองจนกว่าผู้ให้บริการจะยืนยันว่าไม่มีการเติมสินค้าสำเร็จสำหรับเลขอ้างอิงคำสั่งซื้อนั้น
+4. งานที่เป็น `dead` จะสร้างงานคืนเงินโดยอัตโนมัติ ตรวจสอบ `refund_jobs` และสถานะสุดท้ายของคำสั่งซื้อ หากผู้ให้บริการยืนยันการคืนเงินไม่ได้ ให้ติดต่อฝ่ายการเงิน
 
-## Settlement or payment mismatch
+## ยอดชำระหรือรายการกระทบยอดไม่ตรงกัน
 
-1. Sign in using an address in `ADMIN_EMAILS`, then upload the provider CSV at `/admin`.
-2. Use the required columns `event_id,order_id,amount_satang,currency,type`; amounts must be integer satang and event types must be `payment.succeeded`, `payment.failed`, or `payment.refunded`.
-3. Review the saved batch report. It identifies unknown orders, missing internal/provider events, event-type mismatches, and amount/currency mismatches.
-4. Keep affected orders in their existing state until finance confirms the provider record. Do not edit an order amount to force a match.
-5. Imports are append-only; each upload creates a batch. Upload corrected files as new batches so the audit history remains available.
+1. เข้าสู่ระบบด้วยอีเมลที่อยู่ใน `ADMIN_EMAILS` จากนั้นอัปโหลดไฟล์ CSV จากผู้ให้บริการที่หน้า `/admin`
+2. ใช้คอลัมน์ที่กำหนด ได้แก่ `event_id,order_id,amount_satang,currency,type` จำนวนเงินต้องเป็นจำนวนเต็มหน่วยสตางค์ และประเภทเหตุการณ์ต้องเป็น `payment.succeeded`, `payment.failed` หรือ `payment.refunded`
+3. ตรวจสอบรายงานชุดข้อมูลที่บันทึกไว้ ซึ่งจะแสดงคำสั่งซื้อที่ไม่รู้จัก เหตุการณ์ที่ขาดหายจากระบบหรือผู้ให้บริการ ประเภทเหตุการณ์ที่ไม่ตรงกัน และยอดเงินหรือสกุลเงินที่ไม่ตรงกัน
+4. คงสถานะคำสั่งซื้อที่ได้รับผลกระทบไว้ตามเดิมจนกว่าฝ่ายการเงินจะยืนยันข้อมูลจากผู้ให้บริการ ห้ามแก้ยอดคำสั่งซื้อเพื่อบังคับให้ข้อมูลตรงกัน
+5. การนำเข้าข้อมูลเป็นแบบเพิ่มอย่างเดียว แต่ละครั้งที่อัปโหลดจะสร้างชุดข้อมูลใหม่ หากแก้ไขไฟล์แล้ว ให้อัปโหลดเป็นชุดใหม่เพื่อเก็บประวัติการตรวจสอบไว้
 
-## OTP and administrator access
+## OTP และสิทธิ์ผู้ดูแลระบบ
 
-- Add trusted administrator email addresses to `ADMIN_EMAILS`; users receive their role after a successful OTP login. Removing an address from the allowlist demotes the account and denies admin access on its next API request.
-- OTP messages use the `MAIL_*` SMTP settings. In local Compose, inspect the Mailpit inbox at port 8025.
-- OTPs expire after 10 minutes and allow five verification attempts. Requests are rate-limited by client IP and email.
-- Sessions use a 12-hour HttpOnly, SameSite=Strict cookie. Set `COOKIE_SECURE=true` behind HTTPS. Rotate `AUTH_SECRET` and `TRACKING_TOKEN_SECRET` before deployment.
-- Admin product updates, refund requests, and settlement imports are written to `admin_audit_logs`.
-- Apply additive database changes with `npm run migrate --prefix backend`; API startup also applies the migration before accepting traffic.
+- เพิ่มอีเมลผู้ดูแลระบบที่เชื่อถือได้ใน `ADMIN_EMAILS` ผู้ใช้จะได้รับสิทธิ์ตามบทบาทหลังเข้าสู่ระบบด้วย OTP สำเร็จ เมื่อนำอีเมลออกจากรายการอนุญาต บัญชีจะถูกลดสิทธิ์และเข้าใช้หน้าผู้ดูแลระบบไม่ได้ตั้งแต่คำขอ API ครั้งถัดไป
+- ข้อความ OTP ใช้การตั้งค่า SMTP `MAIL_*` ใน Compose สำหรับเครื่อง local ให้ตรวจกล่องจดหมาย Mailpit ที่ port 8025
+- OTP หมดอายุหลัง 10 นาที และยืนยันได้ไม่เกิน 5 ครั้ง คำขอถูกจำกัดจำนวนตาม IP ของผู้ใช้และอีเมล
+- เซสชันใช้คุกกี้ HttpOnly, SameSite=Strict อายุ 12 ชั่วโมง หากใช้งานผ่าน HTTPS ให้ตั้ง `COOKIE_SECURE=true` เปลี่ยนค่า `AUTH_SECRET` และ `TRACKING_TOKEN_SECRET` ก่อนนำระบบขึ้นใช้งานจริง
+- การแก้ไขสินค้า คำขอคืนเงิน และการนำเข้ารายการกระทบยอดของผู้ดูแลระบบจะถูกบันทึกใน `admin_audit_logs`
+- ใช้ `npm run migrate --prefix backend` เพื่อเพิ่มการเปลี่ยนแปลงฐานข้อมูล โดยตอนเริ่มทำงาน API จะรัน migration ก่อนรับคำขอด้วย
 
-## Mock game outage
+## ผู้ให้บริการเกมจำลองขัดข้อง
 
-Set `FAIL_RATE`, `TIMEOUT_RATE`, `SUCCESS_BUT_TIMEOUT_RATE`, and `LATENCY_MS` in `.env` only for local simulations. Once the service is healthy, queued retries resume automatically. Observe successful top-up counts before retrying or replaying jobs.
+ตั้งค่า `FAIL_RATE`, `TIMEOUT_RATE`, `SUCCESS_BUT_TIMEOUT_RATE` และ `LATENCY_MS` ใน `.env` เฉพาะเมื่อต้องการจำลองสถานการณ์บนเครื่อง local เมื่อบริการกลับมาพร้อมใช้งาน งานที่รออยู่จะลองใหม่โดยอัตโนมัติ ตรวจสอบจำนวนการเติมสินค้าที่สำเร็จก่อนลองใหม่หรือเรียกใช้งานซ้ำ

@@ -1,6 +1,6 @@
-# ADR 0005: Integer satang and immutable order price snapshots
+# ADR 0005: ใช้จำนวนเต็มหน่วยสตางค์และ snapshot ราคาที่ไม่เปลี่ยนแปลง
 
-- Status: Accepted
-- Decision: Store product and order amounts as PostgreSQL `BIGINT`, do intermediate percentage and fee calculations with JavaScript `BigInt`, and store the quoted unit price and totals on the order.
-- Rationale: Integer arithmetic avoids floating-point rounding drift; order snapshots remain stable if a product's price changes later.
-- Consequences: JSON API responses expose safe satang values as integers. Amounts beyond JavaScript's safe integer range are rejected before serialization.
+- สถานะ: ยอมรับแล้ว
+- การตัดสินใจ: จัดเก็บจำนวนเงินสินค้าและคำสั่งซื้อเป็น PostgreSQL `BIGINT`, คำนวณเปอร์เซ็นต์และค่าธรรมเนียมระหว่างทางด้วย JavaScript `BigInt` และบันทึกราคาต่อหน่วยกับยอดรวมที่เสนอไว้ในคำสั่งซื้อ
+- เหตุผล: การคำนวณจำนวนเต็มช่วยหลีกเลี่ยงความคลาดเคลื่อนจากการปัดเศษแบบ floating-point ส่วน snapshot ของคำสั่งซื้อจะยังคงเดิมแม้ราคาสินค้าเปลี่ยนภายหลัง
+- ผลที่ตามมา: API JSON ส่งจำนวนเงินหน่วยสตางค์เป็นจำนวนเต็มที่ปลอดภัย หากจำนวนเงินเกินช่วงที่ JavaScript แสดงเป็น integer ได้อย่างปลอดภัย ระบบจะปฏิเสธก่อน serialize

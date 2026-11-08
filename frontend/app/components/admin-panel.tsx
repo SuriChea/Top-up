@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { localizedPath, useLocale } from "./locale";
 
 type Product = {
   sku: string;
@@ -17,6 +18,15 @@ type Order = {
   productName: string;
   totalSatang: number;
   status: string;
+};
+type RefundRequest = {
+  id: number;
+  order_id: string;
+  email: string;
+  product_name: string;
+  total_satang: number;
+  order_status: string;
+  reason: string;
 };
 type Batch = {
   id: string;
@@ -51,8 +61,13 @@ async function readJson<T>(response: Response): Promise<T> {
 
 export default function AdminPanel() {
   const router = useRouter();
+  const locale = useLocale();
+  const english = locale === "en";
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [role, setRole] = useState("customer");
+  const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [reason, setReason] = useState("Customer support refund");
@@ -65,31 +80,38 @@ export default function AdminPanel() {
     try {
       const meResponse = await fetch("/api/v1/auth/me", { cache: "no-store" });
       const me = await readJson<{ user: { role: string } }>(meResponse);
-      if (me.user.role !== "admin") {
+      if (!["admin", "viewer", "support", "finance", "superadmin"].includes(me.user.role)) {
         setProblem("บัญชีนี้ไม่มีสิทธิ์ผู้ดูแลระบบ");
         return;
       }
-      const [productResponse, orderResponse, batchResponse] = await Promise.all([
+      setRole(me.user.role);
+      const canReconcile = ["admin", "finance", "superadmin"].includes(me.user.role);
+      const canRefund = ["admin", "finance", "superadmin"].includes(me.user.role);
+      const [productResponse, orderResponse, batchResponse, refundResponse] = await Promise.all([
         fetch("/api/v1/admin/products", { cache: "no-store" }),
-        fetch("/api/v1/admin/orders", { cache: "no-store" }),
-        fetch("/api/v1/admin/reconciliation", { cache: "no-store" })
+        fetch("/api/v1/admin/orders?limit=50", { cache: "no-store" }),
+        canReconcile ? fetch("/api/v1/admin/reconciliation", { cache: "no-store" }) : Promise.resolve(null),
+        canRefund ? fetch("/api/v1/admin/refund-requests", { cache: "no-store" }) : Promise.resolve(null)
       ]);
-      const [nextProducts, nextOrders, nextBatches] = await Promise.all([
+      const [nextProducts, orderPage, nextBatches, nextRefundRequests] = await Promise.all([
         readJson<Product[]>(productResponse),
-        readJson<Order[]>(orderResponse),
-        readJson<Batch[]>(batchResponse)
+        readJson<{ orders: Order[]; nextCursor: string | null }>(orderResponse),
+        batchResponse ? readJson<Batch[]>(batchResponse) : Promise.resolve([]),
+        refundResponse ? readJson<RefundRequest[]>(refundResponse) : Promise.resolve([])
       ]);
       setProducts(nextProducts);
-      setOrders(nextOrders);
+      setOrders(orderPage.orders);
+      setNextCursor(orderPage.nextCursor);
       setBatches(nextBatches);
+      setRefundRequests(nextRefundRequests);
     } catch (error) {
       if (error instanceof Error && error.message.includes("Sign in")) {
-        router.replace("/login");
+        router.replace(`${localizedPath("/login", locale)}?next=${encodeURIComponent(localizedPath("/admin", locale))}`);
         return;
       }
       setProblem(error instanceof Error ? error.message : "โหลดข้อมูลผู้ดูแลไม่สำเร็จ");
     }
-  }, [router]);
+  }, [router, locale]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, 0);
@@ -124,6 +146,24 @@ export default function AdminPanel() {
     }
   }
 
+  async function loadMoreOrders() {
+    if (!nextCursor) return;
+    setBusy(true);
+    setProblem("");
+    try {
+      const response = await fetch(`/api/v1/admin/orders?limit=50&cursor=${encodeURIComponent(nextCursor)}`, {
+        cache: "no-store"
+      });
+      const page = await readJson<{ orders: Order[]; nextCursor: string | null }>(response);
+      setOrders((current) => [...current, ...page.orders]);
+      setNextCursor(page.nextCursor);
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : "โหลดคำสั่งซื้อเพิ่มเติมไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function requestRefund(orderId: string) {
     setBusy(true);
     setProblem("");
@@ -131,7 +171,10 @@ export default function AdminPanel() {
     try {
       const response = await fetch(`/api/v1/admin/orders/${encodeURIComponent(orderId)}/refund`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "Idempotency-Key": crypto.randomUUID()
+        },
         body: JSON.stringify({ reason })
       });
       await readJson(response);
@@ -139,6 +182,46 @@ export default function AdminPanel() {
       await load();
     } catch (error) {
       setProblem(error instanceof Error ? error.message : "ส่งคำขอคืนเงินไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryFulfillment(orderId: string) {
+    setBusy(true);
+    setProblem("");
+    setNotice("");
+    try {
+      const response = await fetch(`/api/v1/admin/orders/${encodeURIComponent(orderId)}/retry-fulfillment`, {
+        method: "POST"
+      });
+      await readJson(response);
+      setNotice(english ? `Fulfillment retry queued for ${orderId}.` : `ส่ง ${orderId} เข้าคิวเติมสินค้าอีกครั้งแล้ว`);
+      await load();
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : "ส่งงานเติมสินค้าให้ลองใหม่ไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resolveRefundRequest(requestId: number, decision: "approve" | "reject") {
+    setBusy(true);
+    setProblem("");
+    setNotice("");
+    try {
+      const response = await fetch(`/api/v1/admin/refund-requests/${requestId}/${decision}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ note: reason })
+      });
+      await readJson(response);
+      setNotice(decision === "approve"
+        ? (english ? "Refund approved and queued." : "อนุมัติคำขอและส่งคืนเงินเข้าคิวแล้ว")
+        : (english ? "Refund request declined." : "ไม่อนุมัติคำขอคืนเงิน"));
+      await load();
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : "Could not resolve refund request");
     } finally {
       setBusy(false);
     }
@@ -192,58 +275,89 @@ export default function AdminPanel() {
       setProblem("ออกจากระบบไม่สำเร็จ");
       return;
     }
-    router.replace("/login");
+    router.replace(localizedPath("/login", locale));
   }
+
+  const canEditProducts = role === "admin" || role === "superadmin";
+  const canRefund = ["admin", "finance", "superadmin"].includes(role);
+  const canReconcile = ["admin", "finance", "superadmin"].includes(role);
+  const canRetry = ["admin", "support", "superadmin"].includes(role);
 
   return (
     <main className="page-shell admin-layout">
       <div className="admin-heading">
         <div><p className="eyebrow">INBLACK OPERATIONS</p><h1>Admin dashboard</h1></div>
-        <button className="button button-secondary" onClick={logout}>ออกจากระบบ</button>
+        <button className="button button-secondary" onClick={logout}>{english ? "Sign out" : "ออกจากระบบ"}</button>
       </div>
       {problem && <p className="notice notice-error" role="alert">{problem}</p>}
       {notice && <p className="notice" role="status">{notice}</p>}
 
       <section className="admin-card">
-        <div className="section-heading"><div><p className="eyebrow">CATALOG</p><h2>สินค้าและสต็อก</h2></div></div>
+        <div className="section-heading"><div><p className="eyebrow">CATALOG</p><h2>{english ? "Products and inventory" : "สินค้าและสต็อก"}</h2></div></div>
         <div className="admin-table-wrap">
           <table className="admin-table">
-            <thead><tr><th>สินค้า</th><th>ราคา (สตางค์)</th><th>สต็อก (-1 = ไม่จำกัด)</th><th>เปิดขาย</th><th /></tr></thead>
+            <thead><tr><th>{english ? "Product" : "สินค้า"}</th><th>{english ? "Price (satang)" : "ราคา (สตางค์)"}</th><th>{english ? "Stock (-1 = unlimited)" : "สต็อก (-1 = ไม่จำกัด)"}</th><th>{english ? "Active" : "เปิดขาย"}</th><th /></tr></thead>
             <tbody>{products.map((product) => (
               <tr key={product.sku}>
                 <td><strong>{product.name}</strong><small>{product.sku}</small></td>
-                <td><input aria-label={`${product.sku} price in satang`} type="number" min="0" step="1" value={product.price_satang} onChange={(event) => updateProduct(product.sku, { price_satang: Number(event.target.value) })} /></td>
-                <td><input aria-label={`${product.sku} stock`} type="number" min="-1" step="1" value={product.stock} onChange={(event) => updateProduct(product.sku, { stock: Number(event.target.value) })} /></td>
-                <td><input aria-label={`${product.sku} active`} type="checkbox" checked={product.active} onChange={(event) => updateProduct(product.sku, { active: event.target.checked })} /></td>
-                <td><button className="button button-small" disabled={busy} onClick={() => void saveProduct(product)}>บันทึก</button></td>
+                <td>{canEditProducts ? <input aria-label={`${product.sku} price in satang`} type="number" min="0" step="1" value={product.price_satang} onChange={(event) => updateProduct(product.sku, { price_satang: Number(event.target.value) })} /> : formatBaht(product.price_satang)}</td>
+                <td>{canEditProducts ? <input aria-label={`${product.sku} stock`} type="number" min="-1" step="1" value={product.stock} onChange={(event) => updateProduct(product.sku, { stock: Number(event.target.value) })} /> : product.stock}</td>
+                <td>{canEditProducts ? <input aria-label={`${product.sku} active`} type="checkbox" checked={product.active} onChange={(event) => updateProduct(product.sku, { active: event.target.checked })} /> : product.active ? (english ? "Yes" : "ใช่") : (english ? "No" : "ไม่")}</td>
+                <td>{canEditProducts && <button className="button button-small" disabled={busy} onClick={() => void saveProduct(product)}>{english ? "Save" : "บันทึก"}</button>}</td>
               </tr>
             ))}</tbody>
           </table>
         </div>
       </section>
 
+      {canRefund && <section className="admin-card">
+        <div className="section-heading"><div><p className="eyebrow">CUSTOMER SUPPORT</p><h2>{english ? "Refund requests" : "คำขอคืนเงินจากลูกค้า"}</h2></div></div>
+        {refundRequests.length === 0 ? <p className="muted-copy">{english ? "No refund requests are waiting for review." : "ไม่มีคำขอคืนเงินที่รอตรวจสอบ"}</p> : (
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead><tr><th>Order</th><th>{english ? "Customer" : "ลูกค้า"}</th><th>{english ? "Reason" : "เหตุผล"}</th><th>{english ? "Order status" : "สถานะออเดอร์"}</th><th>{english ? "Decision" : "ดำเนินการ"}</th></tr></thead>
+              <tbody>{refundRequests.map((request) => (
+                <tr key={request.id}>
+                  <td>{request.order_id}<small>{request.product_name} · {formatBaht(request.total_satang)}</small></td>
+                  <td>{request.email}</td><td>{request.reason}</td><td>{request.order_status}</td>
+                  <td className="refund-request-actions">
+                    <button className="button button-small" disabled={busy} onClick={() => void resolveRefundRequest(request.id, "approve")}>{english ? "Approve" : "อนุมัติ"}</button>
+                    <button className="button button-small button-danger" disabled={busy || reason.trim().length < 3} onClick={() => void resolveRefundRequest(request.id, "reject")}>{english ? "Reject" : "ปฏิเสธ"}</button>
+                  </td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </section>}
+
       <section className="admin-card">
-        <div className="section-heading"><div><p className="eyebrow">ORDERS & FINANCE</p><h2>คำสั่งซื้อล่าสุด</h2></div></div>
-        <label className="field-label" htmlFor="refund-reason">เหตุผลคืนเงิน</label>
+        <div className="section-heading"><div><p className="eyebrow">ORDERS & FINANCE</p><h2>{english ? "Recent orders" : "คำสั่งซื้อล่าสุด"}</h2></div></div>
+        <label className="field-label" htmlFor="refund-reason">{english ? "Refund reason / decline note" : "เหตุผลคืนเงิน / หมายเหตุไม่อนุมัติ"}</label>
         <input id="refund-reason" maxLength={300} value={reason} onChange={(event) => setReason(event.target.value)} />
         <div className="admin-table-wrap">
           <table className="admin-table">
-            <thead><tr><th>Order</th><th>สินค้า / อีเมล</th><th>ยอด</th><th>สถานะ</th><th /></tr></thead>
+            <thead><tr><th>Order</th><th>{english ? "Product / email" : "สินค้า / อีเมล"}</th><th>{english ? "Total" : "ยอด"}</th><th>{english ? "Status" : "สถานะ"}</th><th /></tr></thead>
             <tbody>{orders.map((order) => (
               <tr key={order.id}>
                 <td>{order.id}</td><td><strong>{order.productName}</strong><small>{order.email}</small></td>
                 <td>{formatBaht(order.totalSatang)}</td><td><span className="status-badge status-muted">{order.status}</span></td>
-                <td>{["PAID", "IN_QUEUE", "IN_PROGRESS", "COMPLETED", "FAILED", "NEEDS_REVIEW"].includes(order.status) &&
-                  <button className="button button-small button-danger" disabled={busy || reason.trim().length < 3} onClick={() => void requestRefund(order.id)}>ขอคืนเงิน</button>}</td>
+                <td className="refund-request-actions">
+                  {canRetry && order.status === "FAILED" &&
+                    <button className="button button-small" disabled={busy} onClick={() => void retryFulfillment(order.id)}>{english ? "Retry" : "ลองเติมอีกครั้ง"}</button>}
+                  {canRefund && ["COMPLETED", "FAILED", "NEEDS_REVIEW"].includes(order.status) &&
+                    <button className="button button-small button-danger" disabled={busy || reason.trim().length < 3} onClick={() => void requestRefund(order.id)}>{english ? "Refund" : "ขอคืนเงิน"}</button>}
+                </td>
               </tr>
             ))}</tbody>
           </table>
         </div>
+        {nextCursor && <button className="button button-secondary" disabled={busy} onClick={() => void loadMoreOrders()}>{english ? "Load more" : "โหลดเพิ่มเติม"}</button>}
       </section>
 
-      <section className="admin-card">
+      {canReconcile && <section className="admin-card">
         <div className="section-heading"><div><p className="eyebrow">FINANCE</p><h2>Payment reconciliation</h2></div></div>
-        <p className="muted-copy">CSV ต้องมีคอลัมน์ event_id, order_id, amount_satang, currency และ type</p>
+        <p className="muted-copy">CSV ต้องมีคอลัมน์ event_id, order_id, amount_satang, type และ currency หรือ settled_at</p>
         <form className="reconciliation-form" onSubmit={importSettlement}>
           <input name="settlement" type="file" accept=".csv,text/csv" required />
           <button className="button button-primary" disabled={busy}>{busy ? "กำลังประมวลผล…" : "นำเข้าและกระทบยอด"}</button>
@@ -262,7 +376,7 @@ export default function AdminPanel() {
             <p key={`${item.provider_event_id}-${index}`}><strong>{item.status}</strong> · {item.order_id} · {formatBaht(item.amount_satang)} — {item.detail}</p>
           ))}
         </div>}
-      </section>
+      </section>}
     </main>
   );
 }

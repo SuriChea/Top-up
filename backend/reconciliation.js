@@ -1,4 +1,4 @@
-const requiredColumns = ["event_id", "order_id", "amount_satang", "currency", "type"];
+const requiredColumns = ["event_id", "order_id", "amount_satang", "type"];
 
 function parseCsv(source) {
   if (typeof source !== "string" || !source.trim()) throw new Error("CSV file is empty");
@@ -39,8 +39,9 @@ function parseCsv(source) {
   if (rows.length < 2) throw new Error("CSV must contain a header and at least one settlement row");
 
   const headers = rows[0].map((header) => header.trim().toLowerCase());
-  if (new Set(headers).size !== headers.length || requiredColumns.some((column) => !headers.includes(column))) {
-    throw new Error(`CSV must include unique columns: ${requiredColumns.join(", ")}`);
+  if (new Set(headers).size !== headers.length || requiredColumns.some((column) => !headers.includes(column)) ||
+      (!headers.includes("currency") && !headers.includes("settled_at"))) {
+    throw new Error(`CSV must include unique columns: ${requiredColumns.join(", ")} and currency or settled_at`);
   }
   if (rows.length - 1 > 10_000) throw new Error("CSV may contain at most 10,000 rows");
 
@@ -50,8 +51,9 @@ function parseCsv(source) {
     const eventId = values[column.event_id].trim();
     const orderId = values[column.order_id].trim();
     const amount = values[column.amount_satang].trim();
-    const currency = values[column.currency].trim().toUpperCase();
+    const currency = column.currency === undefined ? "THB" : values[column.currency].trim().toUpperCase();
     const type = values[column.type].trim();
+    const settledAt = column.settled_at === undefined ? null : values[column.settled_at].trim();
     if (!eventId || eventId.length > 200 || !orderId || orderId.length > 100) {
       throw new Error(`CSV row ${index + 2} has an invalid event or order ID`);
     }
@@ -61,12 +63,16 @@ function parseCsv(source) {
     if (!currency || currency.length > 8 || !/^payment\.(succeeded|failed|refunded)$/.test(type)) {
       throw new Error(`CSV row ${index + 2} has an invalid currency or type`);
     }
+    if (column.settled_at !== undefined && (!settledAt || Number.isNaN(Date.parse(settledAt)))) {
+      throw new Error(`CSV row ${index + 2} has an invalid settled_at timestamp`);
+    }
     return {
       eventId,
       orderId,
       amountSatang: Number(amount),
       currency,
-      type
+      type,
+      settledAt
     };
   });
   if (new Set(parsed.map((record) => record.eventId)).size !== parsed.length) {
@@ -86,7 +92,7 @@ function compareSettlement(provider, internal, orderExists) {
     return { status: "amount_mismatch", detail: "Amount or currency differs from the internal payment event" };
   }
   if (provider.type !== internal.event_type) {
-    return { status: "event_mismatch", detail: "Provider and internal payment event types differ" };
+    return { status: "status_mismatch", detail: "Provider and internal payment event statuses differ" };
   }
   return { status: "matched", detail: "Settlement matches the internal payment event" };
 }
